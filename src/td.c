@@ -45,8 +45,10 @@ int main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	test_arib_std_b25(argv[n+0], argv[n+1], &opt);
-
+	for(;n<=(argc-2);n+=2){
+		test_arib_std_b25(argv[n+0], argv[n+1], &opt);
+	}
+	
 	_CrtDumpMemoryLeaks();
 
 	return EXIT_SUCCESS;
@@ -54,8 +56,8 @@ int main(int argc, char **argv)
 
 static void show_usage()
 {
-	fprintf(stderr, "b25 - ARIB STD-B25 test program ver. 0.2.4 (2008, 4/18)\n");
-	fprintf(stderr, "usage: b25 [options] src.m2t dst.m2t\n");
+	fprintf(stderr, "b25 - ARIB STD-B25 test program ver. 0.2.5 (2012, 2/13)\n");
+	fprintf(stderr, "usage: b25 [options] src.m2t dst.m2t [more pair ..]\n");
 	fprintf(stderr, "options:\n");
 	fprintf(stderr, "  -r round (integer, default=4)\n");
 	fprintf(stderr, "  -s strip\n");
@@ -145,12 +147,15 @@ static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 	int64_t total;
 	int64_t offset;
 
+	unsigned long tick,tock;
+	double mbps;
+
 	ARIB_STD_B25 *b25;
 	B_CAS_CARD   *bcas;
 
 	ARIB_STD_B25_PROGRAM_INFO pgrm;
 
-	uint8_t data[8*1024];
+	uint8_t data[64*1024];
 
 	ARIB_STD_B25_BUFFER sbuf;
 	ARIB_STD_B25_BUFFER dbuf;
@@ -219,6 +224,7 @@ static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 	}
 
 	offset = 0;
+	tock = GetTickCount();
 	while( (n = _read(sfd, data, sizeof(data))) > 0 ){
 		sbuf.data = data;
 		sbuf.size = n;
@@ -246,7 +252,14 @@ static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 		offset += sbuf.size;
 		if(opt->verbose != 0){
 			m = (int)(10000*offset/total);
-			fprintf(stderr, "\rprocessing: %2d.%02d%% ", m/100, m%100);
+			tick = GetTickCount();
+			mbps = 0.0;
+			if (tick-tock > 100) {
+				mbps = offset;
+				mbps /= 1024;
+				mbps /= (tick-tock);
+			}
+			fprintf(stderr, "\rprocessing: %2d.%02d%% [%6.2f MB/sec]", m/100, m%100, mbps);
 		}
 	}
 
@@ -271,7 +284,13 @@ static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 	}
 
 	if(opt->verbose != 0){
-		fprintf(stderr, "\rprocessing: finish  \n");
+		mbps = 0.0;
+		if (tick-tock > 100) {
+			mbps = offset;
+			mbps /= 1024;
+			mbps /= (tick-tock);
+		}
+		fprintf(stderr, "\rprocessing: finish  [%6.2f MB/sec]\n", mbps);
 		fflush(stderr);
 		fflush(stdout);
 	}
