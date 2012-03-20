@@ -191,6 +191,18 @@
 
 【更新履歴】
 
+　・2009, 4/19 - ver. 0.2.4
+
+　　終端パケットが野良パケット (PMT に記載されていない PID の
+　　パケット) だった場合に、ECM が 1 つだけでも復号が行われない
+　　バグを修正
+
+　　transport_error_indicator が立っている場合はパケット処理を
+　　行わず、そのまま素通しするように変更
+
+　　http://www.marumo.ne.jp/db2009_4.htm#19 又は
+　　http://www.marumo.ne.jp/junk/arib_std_b25-0.2.4.lzh
+
 　・2008, 12/30 - ver. 0.2.3
 
 　　CA_descriptor の解釈を行う際に CA_system_id が B-CAS カード

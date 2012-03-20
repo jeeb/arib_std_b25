@@ -570,6 +570,15 @@ static int flush_arib_std_b25(void *std_b25)
 		extract_ts_header(&hdr, curr);
 		crypt = hdr.transport_scrambling_control;
 		pid = hdr.pid;
+
+		if(hdr.transport_error_indicator != 0){
+			/* bit error - append output buffer without parsing */
+			if(!append_work_buffer(&(prv->dbuf), curr, 188)){
+				r = ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+				goto LAST;
+			}
+			goto NEXT;
+		}
 		
 		if( (pid == 0x1fff) && (prv->strip) ){
 			goto NEXT;
@@ -591,6 +600,9 @@ static int flush_arib_std_b25(void *std_b25)
 			
 			if(prv->map[pid].type == PID_MAP_TYPE_OTHER){
 				dec = (DECRYPTOR_ELEM *)(prv->map[pid].target);
+			}else if( (prv->map[pid].type == 0) &&
+				  (prv->decrypt.count == 1) ){
+				dec = prv->decrypt.head;
 			}else{
 				dec = NULL;
 			}
@@ -1797,6 +1809,15 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 		crypt = hdr.transport_scrambling_control;
 		pid = hdr.pid;
 
+		if(hdr.transport_error_indicator != 0){
+			/* bit error - append output buffer without parsing */
+			if(!append_work_buffer(&(prv->dbuf), curr, 188)){
+				r = ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+				goto LAST;
+			}
+			goto NEXT;
+		}
+		
 		if( (pid == 0x1fff) && (prv->strip) ){
 			/* strip null(padding) stream */
 			goto NEXT;
