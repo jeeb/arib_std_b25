@@ -797,6 +797,13 @@ static int get_program_info_arib_std_b25(void *std_b25, ARIB_STD_B25_PROGRAM_INF
 	info->total_packet_count += prv->map[pid].undecrypted;
 	info->undecrypted_packet_count += prv->map[pid].undecrypted;
 
+	pid = pgrm->pcr_pid;
+	if( (pid != 0) && (pid != 0x1fff) ){
+		info->total_packet_count += prv->map[pid].normal_packet;
+		info->total_packet_count += prv->map[pid].undecrypted;
+		info->undecrypted_packet_count += prv->map[pid].undecrypted;
+	}
+
 	strm = pgrm->streams.head;
 	while(strm != NULL){
 		pid = strm->pid;
@@ -1160,6 +1167,7 @@ static int find_pmt(ARIB_STD_B25_PRIVATE_DATA *prv)
 			}
 		}else{
 			pgrm->phase = 2;
+			goto LAST;
 		}
 	NEXT:
 		curr += unit;
@@ -1239,8 +1247,10 @@ static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 		put_stream_list_tail(&(prv->strm_pool), strm);
 	}
 
-	if(!add_ecm_stream(prv, &(pgrm->streams), ecm_pid)){
-		return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+	if( (ecm_pid != 0) && (ecm_pid != 0x1fff) ){
+		if(!add_ecm_stream(prv, &(pgrm->streams), ecm_pid)){
+			return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+		}
 	}
 
 	/* add current stream entries */
@@ -1336,6 +1346,7 @@ static int add_ecm_stream(ARIB_STD_B25_PRIVATE_DATA *prv, TS_STREAM_LIST *list, 
 	strm = find_stream_list_elem(list, ecm_pid);
 	if(strm != NULL){
 		// ECM is already registered
+		prv->map[ecm_pid].ref += 1;
 		return 1;
 	}
 
@@ -1351,6 +1362,7 @@ static int add_ecm_stream(ARIB_STD_B25_PRIVATE_DATA *prv, TS_STREAM_LIST *list, 
 	}
 
 	put_stream_list_tail(list, strm);
+	prv->map[ecm_pid].ref += 1;
 
 	return 1;
 }

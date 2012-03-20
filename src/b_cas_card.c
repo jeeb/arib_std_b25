@@ -45,8 +45,6 @@ static void release_b_cas_card(void *bcas);
 static int init_b_cas_card(void *bcas);
 static int get_init_status_b_cas_card(void *bcas, B_CAS_INIT_STATUS *stat);
 static int proc_ecm_b_cas_card(void *bcas, B_CAS_ECM_RESULT *dst, uint8_t *src, int len);
-static int32_t load_be_uint16(uint8_t *p);
-static int64_t load_be_uint48(uint8_t *p);
 
 /*+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  global function implementation
@@ -82,6 +80,9 @@ B_CAS_CARD *create_b_cas_card()
 static B_CAS_CARD_PRIVATE_DATA *private_data(void *bcas);
 static void teardown(B_CAS_CARD_PRIVATE_DATA *prv);
 static int connect_card(B_CAS_CARD_PRIVATE_DATA *prv, const char *reader_name);
+static int setup_ecm_receive_command(uint8_t *dst, uint8_t *src, int len);
+static int32_t load_be_uint16(uint8_t *p);
+static int64_t load_be_uint48(uint8_t *p);
 
 /*+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  interface method implementation
@@ -175,10 +176,10 @@ static int get_init_status_b_cas_card(void *bcas, B_CAS_INIT_STATUS *stat)
 
 static int proc_ecm_b_cas_card(void *bcas, B_CAS_ECM_RESULT *dst, uint8_t *src, int len)
 {
-	int m;
 	int retry_count;
 	
 	LONG ret;
+	DWORD slen;
 	DWORD rlen;
 	
 	B_CAS_CARD_PRIVATE_DATA *prv;
@@ -197,28 +198,22 @@ static int proc_ecm_b_cas_card(void *bcas, B_CAS_ECM_RESULT *dst, uint8_t *src, 
 		return B_CAS_CARD_ERROR_NOT_INITIALIZED;
 	}
 
-	memcpy(prv->sbuf, ECM_RECEIVE_CMD_HEADER, sizeof(ECM_RECEIVE_CMD_HEADER));
-	m = sizeof(ECM_RECEIVE_CMD_HEADER);
-	prv->sbuf[m] = (uint8_t)(len & 0xff);
-	m += 1;
-	memcpy(prv->sbuf+m, src, len);
-	m += len;
-	prv->sbuf[m] = 0;
-	m += 1;
-
+	slen = setup_ecm_receive_command(prv->sbuf, src, len);
 	memcpy(&sir, SCARD_PCI_T1, sizeof(sir));
 	rlen = B_CAS_BUFFER_MAX;
 
 	retry_count = 0;
-	ret = SCardTransmit(prv->card, SCARD_PCI_T1, prv->sbuf, m, &sir, prv->rbuf, &rlen);
-	while( (ret != SCARD_S_SUCCESS) && (retry_count < 10) ){
+	ret = SCardTransmit(prv->card, SCARD_PCI_T1, prv->sbuf, slen, &sir, prv->rbuf, &rlen);
+	while( ((ret != SCARD_S_SUCCESS) || (rlen < 25)) && (retry_count < 10) ){
 		retry_count += 1;
 		if(!connect_card(prv, prv->reader)){
 			continue;
 		}
+		slen = setup_ecm_receive_command(prv->sbuf, src, len);
 		memcpy(&sir, SCARD_PCI_T1, sizeof(sir));
 		rlen = B_CAS_BUFFER_MAX;
-		ret = SCardTransmit(prv->card, SCARD_PCI_T1, prv->sbuf, m, &sir, prv->rbuf, &rlen);
+
+		ret = SCardTransmit(prv->card, SCARD_PCI_T1, prv->sbuf, slen, &sir, prv->rbuf, &rlen);
 	}
 
 	if( (ret != SCARD_S_SUCCESS) || (rlen < 25) ){
@@ -287,7 +282,7 @@ static int connect_card(B_CAS_CARD_PRIVATE_DATA *prv, const char *reader_name)
 	SCARD_IO_REQUEST sir;
 
 	if(prv->card != 0){
-		SCardDisconnect(prv->card, SCARD_LEAVE_CARD);
+		SCardDisconnect(prv->card, SCARD_RESET_CARD);
 		prv->card = 0;
 	}
 
@@ -322,6 +317,22 @@ static int connect_card(B_CAS_CARD_PRIVATE_DATA *prv, const char *reader_name)
 	prv->stat.card_status = load_be_uint16(p+2);
 
 	return 1;
+}
+
+static int setup_ecm_receive_command(uint8_t *dst, uint8_t *src, int len)
+{
+	int r;
+	
+	r  = sizeof(ECM_RECEIVE_CMD_HEADER);
+	memcpy(dst+0, ECM_RECEIVE_CMD_HEADER, r);
+	dst[r] = (uint8_t)(len & 0xff);
+	r += 1;
+	memcpy(dst+r, src, len);
+	r += len;
+	dst[r] = 0;
+	r += 1;
+
+	return r;
 }
 
 static int32_t load_be_uint16(uint8_t *p)

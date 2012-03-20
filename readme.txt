@@ -4,7 +4,7 @@
 
 【バージョン】
 
-　0.1.3
+　0.1.4
 
 【作者】
 
@@ -13,11 +13,11 @@
 
 【一次配布元】
 
-　http://www.marumo.ne.jp/db2008_2.htm#01
+　http://www.marumo.ne.jp/db2008_2.htm#02
 
 　あるいは
 
-　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.3.lzh
+　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.4.lzh
 
 【目的】
 
@@ -169,6 +169,17 @@
 　　1 各モジュールが確保したリソースを解放する
 
 【更新履歴】
+
+　・2008, 2/2 - ver. 0.1.4
+
+　　ver. 0.1.3 での PMT 処理方法変更に問題があり、PMT が更新された
+　　場合、それ以降で正常な処理が行えなくなっていたバグを修正
+
+　　B-CAS カードとの通信でエラーが発生した場合のリトライ処理が機能
+　　していなかったバグを修正
+
+　　http://www.marumo.ne.jp/db2008_2.htm#2 又は
+　　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.4.lzh
 
 　・2008, 2/1 - ver. 0.1.3
 
