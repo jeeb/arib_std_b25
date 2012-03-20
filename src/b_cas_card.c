@@ -255,7 +255,7 @@ static B_CAS_CARD_PRIVATE_DATA *private_data(void *bcas)
 static void teardown(B_CAS_CARD_PRIVATE_DATA *prv)
 {
 	if(prv->card != 0){
-		SCardDisconnect(prv->card, SCARD_RESET_CARD);
+		SCardDisconnect(prv->card, SCARD_LEAVE_CARD);
 		prv->card = 0;
 	}
 
@@ -286,11 +286,11 @@ static int connect_card(B_CAS_CARD_PRIVATE_DATA *prv, const char *reader_name)
 	SCARD_IO_REQUEST sir;
 
 	if(prv->card != 0){
-		SCardDisconnect(prv->card, SCARD_RESET_CARD);
+		SCardDisconnect(prv->card, SCARD_LEAVE_CARD);
 		prv->card = 0;
 	}
 
-	ret = SCardConnect(prv->mng, reader_name, SCARD_SHARE_EXCLUSIVE, SCARD_PROTOCOL_T1, &(prv->card), &protocol);
+	ret = SCardConnect(prv->mng, reader_name, SCARD_SHARE_SHARED, SCARD_PROTOCOL_T1, &(prv->card), &protocol);
 	if(ret != SCARD_S_SUCCESS){
 		return 0;
 	}

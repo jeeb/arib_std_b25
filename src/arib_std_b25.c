@@ -22,7 +22,15 @@ typedef struct {
 typedef struct {
 	int32_t           pid;
 	int32_t           type;
-} TS_STREAM_INFO;
+	void             *prev;
+	void             *next;
+} TS_STREAM_ELEM;
+
+typedef struct {
+	TS_STREAM_ELEM   *head;
+	TS_STREAM_ELEM   *tail;
+	int32_t           count;
+} TS_STREAM_LIST;
 
 typedef struct {
 	
@@ -56,22 +64,45 @@ typedef struct {
 
 typedef struct {
 
-	uint32_t          pmt_pid;
+	int32_t           phase;
+	
+	int32_t           pmt_pid;
 	TS_SECTION        pmt_curr;
 	TS_SECTION        pmt_next;
 
-	uint32_t          pcr_pid;
-	
-	uint32_t          ecm_pid;
+	int32_t           pcr_pid;
+
+	TS_STREAM_LIST    streams;
+
+} TS_PROGRAM;
+
+typedef struct {
+
+	int32_t           ref;
+	int32_t           phase;
+
+	int32_t           ecm_pid;
 	TS_SECTION        ecm_curr;
 	TS_SECTION        ecm_next;
 
-	TS_STREAM_INFO   *streams;
-	int32_t           s_count;
-
 	MULTI2           *m2;
 
-} TS_PROGRAM;
+	void             *prev;
+	void             *next;
+
+} DECRYPTOR_ELEM;
+
+typedef struct {
+	DECRYPTOR_ELEM   *head;
+	DECRYPTOR_ELEM   *tail;
+	int32_t           count;
+} DECRYPTOR_LIST;
+
+typedef struct {
+	uint32_t          ref;
+	uint32_t          type;
+	void             *target;
+} PID_MAP;
 
 typedef struct {
 
@@ -83,11 +114,15 @@ typedef struct {
 
 	TS_SECTION        pat_curr;
 	TS_SECTION        pat_next;
+
+	TS_STREAM_LIST    strm_pool;
 	
 	int32_t           p_count;
 	TS_PROGRAM       *program;
 
-	TS_PROGRAM       *map[0x2000];
+	DECRYPTOR_LIST    decrypt;
+
+	PID_MAP           map[0x2000];
 
 	B_CAS_CARD       *bcas;
 
@@ -265,6 +300,18 @@ enum TS_DESCRIPTOR_TAG {
 	TS_DESCRIPTOR_TAG_SYSTEM_MANAGEMENT         = 0xfe,
 };
 
+enum PID_MAP_TYPE {
+	PID_MAP_TYPE_UNKNOWN                        = 0x0000,
+	PID_MAP_TYPE_PAT                            = 0x0100,
+	PID_MAP_TYPE_PMT                            = 0x0200,
+	PID_MAP_TYPE_NIT                            = 0x0300,
+	PID_MAP_TYPE_PCR                            = 0x0400,
+	PID_MAP_TYPE_ECM                            = 0x0500,
+	PID_MAP_TYPE_EMM                            = 0x0600,
+	PID_MAP_TYPE_EIT                            = 0x0700,
+	PID_MAP_TYPE_OTHER                          = 0xff00,
+};
+
 /*+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  function prottypes (interface method)
  ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
@@ -320,17 +367,23 @@ static int find_pat(ARIB_STD_B25_PRIVATE_DATA *prv);
 static int proc_pat(ARIB_STD_B25_PRIVATE_DATA *prv);
 static int check_pmt_complete(ARIB_STD_B25_PRIVATE_DATA *prv);
 static int find_pmt(ARIB_STD_B25_PRIVATE_DATA *prv);
-static int proc_pmt(TS_PROGRAM *pgrm);
-static uint8_t *proc_pmt_descriptor(TS_PROGRAM *pgrm, uint8_t *head, uint8_t *tail);
+static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm);
+static int32_t find_ca_descriptor_pid(uint8_t *head, uint8_t *tail);
 static int32_t count_pmt_stream(uint8_t *head, uint8_t *tail);
-static void setup_pid_map(ARIB_STD_B25_PRIVATE_DATA *prv);
 static int check_ecm_complete(ARIB_STD_B25_PRIVATE_DATA *prv);
 static int find_ecm(ARIB_STD_B25_PRIVATE_DATA *prv);
-static int setup_multi2(ARIB_STD_B25_PRIVATE_DATA *prv);
-static int proc_ecm(TS_PROGRAM *pgrm, B_CAS_CARD *bcas);
+static int proc_ecm(DECRYPTOR_ELEM *dec, B_CAS_CARD *bcas);
 static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv);
 
-static void release_program(TS_PROGRAM *pgrm);
+static void release_program(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm);
+
+static DECRYPTOR_ELEM *set_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, int32_t pid);
+static void remove_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, DECRYPTOR_ELEM *dec);
+
+static TS_STREAM_ELEM *get_stream_list_head(TS_STREAM_LIST *list);
+static TS_STREAM_ELEM *create_stream_elem(int32_t pid, int32_t type);
+static void put_stream_list_tail(TS_STREAM_LIST *list, TS_STREAM_ELEM *elem);
+static void clear_stream_list(TS_STREAM_LIST *list);
 
 static int reserve_work_buffer(TS_WORK_BUFFER *buf, int32_t size);
 static int append_work_buffer(TS_WORK_BUFFER *buf, uint8_t *data, int32_t size);
@@ -420,25 +473,21 @@ static int flush_arib_std_b25(void *std_b25)
 
 	int32_t crypt;
 	int32_t unit;
-	uint32_t pid;
+	int32_t pid;
 
 	uint8_t *p;
 	uint8_t *curr;
 	uint8_t *tail;
-	
-	ARIB_STD_B25_PRIVATE_DATA *prv;
 
-	TS_PROGRAM *pgrm;
 	TS_HEADER hdr;
+	DECRYPTOR_ELEM *dec;
+	TS_PROGRAM *pgrm;
+
+	ARIB_STD_B25_PRIVATE_DATA *prv;
 
 	prv = private_data(std_b25);
 	if(prv == NULL){
 		return ARIB_STD_B25_ERROR_INVALID_PARAM;
-	}
-
-	r = proc_arib_std_b25(prv);
-	if(r < 0){
-		return r;
 	}
 
 	if(prv->unit_size < 188){
@@ -446,6 +495,11 @@ static int flush_arib_std_b25(void *std_b25)
 		if(r < 0){
 			return r;
 		}
+	}
+
+	r = proc_arib_std_b25(prv);
+	if(r < 0){
+		return r;
 	}
 
 	unit = prv->unit_size;
@@ -471,21 +525,25 @@ static int flush_arib_std_b25(void *std_b25)
 		extract_ts_header(&hdr, curr);
 		crypt = hdr.transport_scrambling_control;
 		pid = hdr.pid;
-		pgrm = prv->map[pid];
-		if(pgrm == NULL){
-			pgrm = prv->program + 0;
-		}
-
-		p = curr+4;
 		
-		if(hdr.adaptation_field_control & 0x01){
+		p = curr+4;
+
+		if( (crypt != 0) &&
+		    (hdr.adaptation_field_control & 0x01) &&
+		    (prv->map[pid].type == PID_MAP_TYPE_OTHER) ){
+
+			dec = (DECRYPTOR_ELEM *)(prv->map[pid].target);
+
 			if(hdr.adaptation_field_control & 0x02){
 				p += (p[0]+1);
 			}
 			n = 188 - (p-curr);
 		
-			if( (crypt != 0) && (pgrm->m2 != NULL) ){
-				m = pgrm->m2->decrypt(pgrm->m2, crypt, p, n);
+			if( dec != NULL ){
+				if(hdr.payload_unit_start_indicator == 1){
+					r = 0;
+				}
+				m = dec->m2->decrypt(dec->m2, crypt, p, n);
 				if(m < 0){
 					r = ARIB_STD_B25_ERROR_DECRYPT_FAILURE;
 					goto LAST;
@@ -499,27 +557,28 @@ static int flush_arib_std_b25(void *std_b25)
 			goto LAST;
 		}
 
-		if(pid == pgrm->ecm_pid){
-			r = set_ts_section_data(&(pgrm->ecm_next), &hdr, p, n);
+		if(prv->map[pid].type == PID_MAP_TYPE_ECM){
+			dec = (DECRYPTOR_ELEM *)(prv->map[pid].target);
+			r = set_ts_section_data(&(dec->ecm_next), &hdr, p, n);
 			if(r < 0){
 				goto LAST;
 			}
-			if(check_ts_section(&(pgrm->ecm_next))){
-				if( (!check_ts_section_crc(&(pgrm->ecm_next))) ||
-				    (pgrm->ecm_next.hdr.current_next_indicator == 0) ||
-				    (compare_ts_section(&(pgrm->ecm_curr), &(pgrm->ecm_next)) == 0) ){
-					reset_ts_section(&(pgrm->ecm_next));
-					curr += unit;
-					continue;
+			if(check_ts_section(&(dec->ecm_next))){
+				if( (!check_ts_section_crc(&(dec->ecm_next))) ||
+				    (dec->ecm_next.hdr.current_next_indicator == 0) ||
+				    (compare_ts_section(&(dec->ecm_curr), &(dec->ecm_next)) == 0) ){
+					reset_ts_section(&(dec->ecm_next));
+					goto NEXT;
 				}
-				swap_ts_section(&(pgrm->ecm_curr), &(pgrm->ecm_next));
-				reset_ts_section(&(pgrm->ecm_next));
-				r = proc_ecm(pgrm, prv->bcas);
+				swap_ts_section(&(dec->ecm_curr), &(dec->ecm_next));
+				reset_ts_section(&(dec->ecm_next));
+				r = proc_ecm(dec, prv->bcas);
 				if(r < 0){
 					goto LAST;
 				}
 			}
-		}else if(pid == pgrm->pmt_pid){
+		}else if(prv->map[pid].type == PID_MAP_TYPE_PMT){
+			pgrm = (TS_PROGRAM *)(prv->map[pid].target);
 			r = set_ts_section_data(&(pgrm->pmt_next), &hdr, p, n);
 			if(r < 0){
 				goto LAST;
@@ -529,18 +588,18 @@ static int flush_arib_std_b25(void *std_b25)
 				    (pgrm->pmt_next.hdr.current_next_indicator == 0) ||
 				    (compare_ts_section(&(pgrm->pmt_curr), &(pgrm->pmt_next)) == 0) ){
 					reset_ts_section(&(pgrm->pmt_next));
-					curr += unit;
-					continue;
+					goto NEXT;
 				}
 				swap_ts_section(&(pgrm->pmt_curr), &(pgrm->pmt_next));
 				reset_ts_section(&(pgrm->pmt_next));
-				r = proc_pmt(pgrm);
+				r = proc_pmt(prv, pgrm);
 				if(r < 0){
 					goto LAST;
 				}
-				setup_pid_map(prv);
-				curr += unit;
-				goto LAST;
+				if(!check_ecm_complete(prv)){
+					curr += unit;
+					goto LAST;
+				}
 			}
 		}else if(pid == 0x0000){
 			r = set_ts_section_data(&(prv->pat_next), &hdr, p, n);
@@ -552,8 +611,7 @@ static int flush_arib_std_b25(void *std_b25)
 				    (prv->pat_next.hdr.current_next_indicator == 0) ||
 				    (compare_ts_section(&(prv->pat_curr), &(prv->pat_next)) == 0)){
 					reset_ts_section(&(prv->pat_next));
-					curr += unit;
-					continue;
+					goto NEXT;
 				}
 				swap_ts_section(&(prv->pat_curr), &(prv->pat_next));
 				reset_ts_section(&(prv->pat_next));
@@ -566,6 +624,7 @@ static int flush_arib_std_b25(void *std_b25)
 			}
 		}
 
+	NEXT:
 		curr += unit;
 	}
 
@@ -643,7 +702,6 @@ static int put_arib_std_b25(void *std_b25, ARIB_STD_B25_BUFFER *buf)
 			}
 		}
 		prv->sbuf_offset = 0;
-		setup_pid_map(prv);
 	}
 
 	if(!check_ecm_complete(prv)){
@@ -661,7 +719,6 @@ static int put_arib_std_b25(void *std_b25, ARIB_STD_B25_BUFFER *buf)
 			}
 		}
 		prv->sbuf_offset = 0;
-		n = setup_multi2(prv);
 	}
 
 	return proc_arib_std_b25(prv);
@@ -715,12 +772,18 @@ static void teardown(ARIB_STD_B25_PRIVATE_DATA *prv)
 
 	if(prv->program != NULL){
 		for(i=0;i<prv->p_count;i++){
-			release_program(prv->program+i);
+			release_program(prv, prv->program+i);
 		}
 		free(prv->program);
 		prv->program = NULL;
 	}
 	prv->p_count = 0;
+
+	clear_stream_list(&(prv->strm_pool));
+
+	while(prv->decrypt.head != NULL){
+		remove_decryptor(prv, prv->decrypt.head);
+	}
 
 	memset(prv->map, 0, sizeof(prv->map));
 
@@ -866,7 +929,7 @@ LAST:
 static int proc_pat(ARIB_STD_B25_PRIVATE_DATA *prv)
 {
 	int i;
-	int ofst;
+	int offset;
 	int len;
 	int count;
 	
@@ -878,7 +941,7 @@ static int proc_pat(ARIB_STD_B25_PRIVATE_DATA *prv)
 	
 	TS_PROGRAM *work;
 
-	ofst = 8;
+	offset = 8;
 	len = prv->pat_curr.hdr.section_length - (5+4);
 
 	count = len / 4;
@@ -889,7 +952,7 @@ static int proc_pat(ARIB_STD_B25_PRIVATE_DATA *prv)
 	
 	if(prv->program != NULL){
 		for(i=0;i<prv->p_count;i++){
-			release_program(prv->program+i);
+			release_program(prv, prv->program+i);
 		}
 		free(prv->program);
 		prv->program = NULL;
@@ -897,7 +960,7 @@ static int proc_pat(ARIB_STD_B25_PRIVATE_DATA *prv)
 	prv->p_count = 0;
 	memset(&(prv->map), 0, sizeof(prv->map));
 
-	head = prv->pat_curr.buf.head + ofst;
+	head = prv->pat_curr.buf.head + offset;
 	tail = head + len;
 
 	i = 0;
@@ -906,7 +969,8 @@ static int proc_pat(ARIB_STD_B25_PRIVATE_DATA *prv)
 		pid = ((head[2] << 8) | head[3]) & 0x1fff;
 		if(program_number != 0){
 			work[i].pmt_pid = pid;
-			prv->map[pid] = work+i;
+			prv->map[pid].type = PID_MAP_TYPE_PMT;
+			prv->map[pid].target = work+i;
 			i += 1;
 		}
 		head += 4;
@@ -914,18 +978,37 @@ static int proc_pat(ARIB_STD_B25_PRIVATE_DATA *prv)
 
 	prv->program = work;
 	prv->p_count = i;
+	
+	prv->map[0].ref = 1;
+	prv->map[0].type = PID_MAP_TYPE_PAT;
+	prv->map[0].target = NULL;
 
 	return 0;
 }
 
 static int check_pmt_complete(ARIB_STD_B25_PRIVATE_DATA *prv)
 {
-	int i;
+	int i,n;
+	int num[3];
+
+	memset(num, 0, sizeof(num));
 
 	for(i=0;i<prv->p_count;i++){
-		if(!check_ts_section(&(prv->program[i].pmt_curr))){
-			return 0;
+		n = prv->program[i].phase;
+		if(n < 0){
+			n = 0;
+		}else if(n > 2){
+			n = 2;
 		}
+		num[n] += 1;
+	}
+
+	if(num[2] > 0){
+		return 1;
+	}
+
+	if(num[0] > 0){
+		return 0;
 	}
 
 	return 1;
@@ -934,7 +1017,7 @@ static int check_pmt_complete(ARIB_STD_B25_PRIVATE_DATA *prv)
 static int find_pmt(ARIB_STD_B25_PRIVATE_DATA *prv)
 {
 	int r;
-	int i,n;
+	int n;
 	
 	int32_t unit;
 
@@ -951,6 +1034,7 @@ static int find_pmt(ARIB_STD_B25_PRIVATE_DATA *prv)
 	tail = prv->sbuf.tail;
 
 	while( (curr+unit) <= tail ){
+		
 		if(curr[0] != 0x47){
 			p = resync(curr, tail, unit);
 			if(p == NULL){
@@ -958,9 +1042,18 @@ static int find_pmt(ARIB_STD_B25_PRIVATE_DATA *prv)
 			}
 			curr = p;
 		}
+		
 		extract_ts_header(&hdr, curr);
-		pgrm = prv->map[hdr.pid];
-		if( (pgrm != NULL) && (!check_ts_section(&(pgrm->pmt_curr))) ){
+		
+		if(prv->map[hdr.pid].type != PID_MAP_TYPE_PMT){
+			goto NEXT;
+		}
+		pgrm = (TS_PROGRAM *)(prv->map[hdr.pid].target);
+		if(pgrm == NULL){
+			goto NEXT;
+		}
+		
+		if(pgrm->phase == 0){
 			p = curr + 4;
 			if(hdr.adaptation_field_control & 0x02){
 				p += (p[0]+1);
@@ -979,87 +1072,156 @@ static int find_pmt(ARIB_STD_B25_PRIVATE_DATA *prv)
 				}
 				swap_ts_section(&(pgrm->pmt_curr), &(pgrm->pmt_next));
 				reset_ts_section(&(pgrm->pmt_next));
+				r = proc_pmt(prv, pgrm);
+				if(r < 0){
+					goto LAST;
+				}
+				pgrm->phase = 1;
 				if(check_pmt_complete(prv)){
 					curr += unit;
 					goto LAST;
 				}
 			}
+		}else{
+			pgrm->phase = 2;
 		}
+	NEXT:
 		curr += unit;
 	}
 
 LAST:
 	prv->sbuf_offset = curr - prv->sbuf.head;
 
-	if(check_pmt_complete(prv)){
-		for(i=0;i<prv->p_count;i++){
-			r = proc_pmt(prv->program+i);
-			if(r < 0){
-				break;
-			}
-		}
-	}
-
 	return r;
 }
 
-static int proc_pmt(TS_PROGRAM *pgrm)
+static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 {
 	int r;
 
-	int i;
-	int ofst;
-	int len;
+	int offset;
+	int length;
 
 	uint8_t *head;
 	uint8_t *tail;
 
-	uint32_t program_info_length;
+	int32_t ecm_pid;
+	int32_t pid;
+	int32_t type;
+
+	DECRYPTOR_ELEM *dec[2];
 	
-	uint32_t es_info_length;
+	TS_STREAM_ELEM *strm;
 
 	r = 0;
-	ofst = 8;
-	len = pgrm->pmt_curr.hdr.section_length - (5+4);
+	dec[0] = NULL;
+	
+	offset = 8;
+	length = pgrm->pmt_curr.hdr.section_length - (5+4);
 
-	head = pgrm->pmt_curr.buf.head + ofst;
-	tail = head + len;
+	head = pgrm->pmt_curr.buf.head + offset;
+	tail = head + length;
 
 	pgrm->pcr_pid = ((head[0] << 8) | head[1]) & 0x1fff;
-	program_info_length = ((head[2] << 8) | head[3]) & 0x0fff;
+	length = ((head[2] << 8) | head[3]) & 0x0fff;
 	head += 4;
-	if(head+program_info_length > tail){
+	if(head+length > tail){
 		/* broken PMT - ignore */
 		return 0;
 	}
 
-	head = proc_pmt_descriptor(pgrm, head, head+program_info_length);
-
-	pgrm->s_count = count_pmt_stream(head, tail);
-	if(pgrm->streams != NULL){
-		free(pgrm->streams);
-		pgrm->streams = NULL;
+	/* find major ecm_pid and regist decryptor */
+	ecm_pid = find_ca_descriptor_pid(head, head+length);
+	if( (ecm_pid != 0) && (ecm_pid != 0x1fff) ){
+		dec[0] = set_decryptor(prv, ecm_pid);
+		if(dec[0] == NULL){
+			return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+		}
+		dec[0]->ref += 1;
+	}
+	head += length;
+	
+	/* unref old stream entries */
+	while( (strm = get_stream_list_head(&(pgrm->streams))) != NULL ){
+		pid = strm->pid;
+		prv->map[pid].ref -= 1;
+		if( prv->map[pid].ref < 1 ){
+			if( (prv->map[pid].type == PID_MAP_TYPE_OTHER) &&
+				(prv->map[pid].target != NULL) ){
+				dec[1] = (DECRYPTOR_ELEM *)(prv->map[pid].target);
+				dec[1]->ref -= 1;
+				if(dec[1]->ref < 1){
+					remove_decryptor(prv, dec[1]);
+					dec[1] = NULL;
+				}
+			}
+			prv->map[pid].type = PID_MAP_TYPE_UNKNOWN;
+			prv->map[pid].ref = 0;
+			prv->map[pid].target = NULL;
+		}
+		memset(strm, 0, sizeof(TS_STREAM_ELEM));
+		put_stream_list_tail(&(prv->strm_pool), strm);
 	}
 
-	pgrm->streams = (TS_STREAM_INFO *)calloc(pgrm->s_count, sizeof(TS_STREAM_INFO));
-	if(pgrm->streams == NULL){
-		return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
-	}
-
-	i = 0;
+	/* add current stream entries */
 	while( head+4 < tail ){
-		pgrm->streams[i].type = head[0];
-		pgrm->streams[i].pid = ((head[1] << 8) | head[2]) & 0x1fff;
-		es_info_length = ((head[3] << 8) | head[4]) & 0x0fff;
-		i += 1;
-		/* ignore ES descriptors */
-		head += (5 + es_info_length);
+
+		type = head[0];
+		pid = ((head[1] << 8) | head[2]) & 0x1fff;
+		length = ((head[3] << 8) | head[4]) & 0x0fff;
+		head += 5;
+		ecm_pid = find_ca_descriptor_pid(head, head+length);
+		head += length;
+		
+		if( (ecm_pid != 0) && (ecm_pid != 0x1fff) ){
+			dec[1] = set_decryptor(prv, ecm_pid);
+			if(dec[1] == NULL){
+				return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+			}
+		}else{
+			dec[1] = NULL;
+		}
+
+		strm = get_stream_list_head(&(prv->strm_pool));
+		if( strm == NULL ){
+			strm = create_stream_elem(pid, type);
+			if(strm == NULL){
+				return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+			}
+		}else{
+			strm->pid = pid;
+			strm->type = type;
+		}
+		
+		prv->map[pid].ref += 1;
+		if(prv->map[pid].ref == 1){
+			prv->map[pid].type = PID_MAP_TYPE_OTHER;
+			if( dec[1] != NULL ){
+				prv->map[pid].target = dec[1];
+				dec[1]->ref += 1;
+			}else if( dec[0] != NULL ){
+				prv->map[pid].target = dec[0];
+				dec[0]->ref += 1;
+			}else{
+				prv->map[pid].target = NULL;
+			}
+		}
+
+		put_stream_list_tail(&(pgrm->streams), strm);
+	}
+
+	if( dec[0] != NULL ){
+		dec[0]->ref -= 1;
+		if( dec[0]->ref < 1 ){
+			remove_decryptor(prv, dec[0]);
+			dec[0] = NULL;
+		}
 	}
 
 	return 0;
 }
-
-static uint8_t *proc_pmt_descriptor(TS_PROGRAM *pgrm, uint8_t *head, uint8_t *tail)
+		
+static int32_t find_ca_descriptor_pid(uint8_t *head, uint8_t *tail)
 {
 	uint32_t ca_pid;
 	uint32_t ca_sys_id;
@@ -1076,94 +1238,26 @@ static uint8_t *proc_pmt_descriptor(TS_PROGRAM *pgrm, uint8_t *head, uint8_t *ta
 		    (head+len <= tail) ){
 			ca_sys_id = ((head[0] << 8) | head[1]);
 			ca_pid = ((head[2] << 8) | head[3]) & 0x1fff;
-			if(ca_pid != pgrm->ecm_pid){
-				reset_ts_section(&(pgrm->ecm_curr));
-				reset_ts_section(&(pgrm->ecm_next));
-			}
-			pgrm->ecm_pid = ca_pid;
+			return ca_pid;
 		}
 		head += len;
 	}
 
-	return tail;
-}
-
-static int32_t count_pmt_stream(uint8_t *head, uint8_t *tail)
-{
-	int32_t r;
-
-	int32_t stream_type;
-	int32_t stream_pid;
-	int32_t es_info_length;
-
-	r = 0;
-
-	while(head+4 < tail){
-		stream_type = head[0];
-		stream_pid = ((head[1] << 8) | head[2]) & 0x1fff;
-		es_info_length = ((head[3] << 8) | head[4]) & 0x0fff;
-		r += 1;
-		head += (5 + es_info_length);
-	}
-
-	return r;
-}
-
-static void setup_pid_map(ARIB_STD_B25_PRIVATE_DATA *prv)
-{
-	int i,j;
-	uint32_t pid;
-	TS_PROGRAM *pgrm;
-
-	memset(&(prv->map), 0, sizeof(prv->map));
-
-	for(i=0;i<prv->p_count;i++){
-		pgrm = prv->program + i; 
-		pid = pgrm->pmt_pid;
-		if( (pid > 0) && (prv->map[pid] == NULL) ){
-			prv->map[pid] = pgrm;
-		}
-		pid = pgrm->pcr_pid;
-		if( (pid > 0) && (prv->map[pid] == NULL) ){
-			prv->map[pid] = pgrm;
-		}
-		pid = pgrm->ecm_pid;
-		if( (pid > 0) && (prv->map[pid] == NULL) ){
-			prv->map[pid] = pgrm;
-		}
-		for(j=0;j<pgrm->s_count;j++){
-			pid = pgrm->streams[j].pid;
-			if( (pid > 0) && (prv->map[pid] == NULL) ){
-				prv->map[pid] = pgrm;
-			}
-		}
-	}
+	return 0;
 }
 
 static int check_ecm_complete(ARIB_STD_B25_PRIVATE_DATA *prv)
 {
-	int i;
-	
-	uint32_t pid;
-	TS_PROGRAM *pgrm;
+	DECRYPTOR_ELEM *e;
 
-	for(i=0;i<prv->p_count;i++){
-		
-		pid = prv->program[i].ecm_pid;
-		if(pid == 0){
-			/* non scramble program*/
-			continue;
-		}
-		pgrm = prv->map[pid];
-		if( pgrm != (prv->program + i) ){
-			/* slave program */
-			continue;
-		}
-		
-		if( !check_ts_section(&(prv->program[i].ecm_curr)) ){
-			/* scramble program and ECM is not received */
+	e = prv->decrypt.head;
+	while( e != NULL ){
+		if( (e->ref > 0) &&
+		    !check_ts_section(&(e->ecm_curr)) ){
+			/* ECM is not received */
 			return 0;
 		}
+		e = (DECRYPTOR_ELEM *)(e->next);
 	}
 
 	return 1;
@@ -1181,7 +1275,7 @@ static int find_ecm(ARIB_STD_B25_PRIVATE_DATA *prv)
 	uint8_t *tail;
 
 	TS_HEADER hdr;
-	TS_PROGRAM *pgrm;
+	DECRYPTOR_ELEM *dec;
 
 	r = 0;
 	unit = prv->unit_size;
@@ -1197,34 +1291,51 @@ static int find_ecm(ARIB_STD_B25_PRIVATE_DATA *prv)
 			curr = p;
 		}
 		extract_ts_header(&hdr, curr);
-		pgrm = prv->map[hdr.pid];
-		if( (pgrm != NULL) &&
-		    (((uint32_t)hdr.pid) == pgrm->ecm_pid) &&
-		    (!check_ts_section(&(pgrm->ecm_curr))) ){
+		if(prv->map[hdr.pid].type != PID_MAP_TYPE_ECM){
+			goto NEXT;
+		}
+		dec = (DECRYPTOR_ELEM *)(prv->map[hdr.pid].target);
+		if(dec == NULL){
+			goto NEXT;
+		}
+
+		if(dec->phase == 0){
 			p = curr + 4;
 			if(hdr.adaptation_field_control & 0x02){
 				p += (p[0]+1);
 			}
 			n = 188 - (p-curr);
-			r = set_ts_section_data(&(pgrm->ecm_next), &hdr, p, n);
+			r = set_ts_section_data(&(dec->ecm_next), &hdr, p, n);
 			if(r < 0){
 				goto LAST;
 			}
-			if(check_ts_section(&(pgrm->ecm_next))){
-				if( (!check_ts_section_crc(&(pgrm->ecm_next))) ||
-				    (pgrm->ecm_next.hdr.current_next_indicator == 0) ){ 
-					reset_ts_section(&(pgrm->ecm_next));
+			if(check_ts_section(&(dec->ecm_next))){
+				if( (!check_ts_section_crc(&(dec->ecm_next))) ||
+				    (dec->ecm_next.hdr.current_next_indicator == 0) ){ 
+					reset_ts_section(&(dec->ecm_next));
 					curr += unit;
 					continue;
 				}
-				swap_ts_section(&(pgrm->ecm_curr), &(pgrm->ecm_next));
-				reset_ts_section(&(pgrm->ecm_next));
+				swap_ts_section(&(dec->ecm_curr), &(dec->ecm_next));
+				reset_ts_section(&(dec->ecm_next));
+				r = proc_ecm(dec, prv->bcas);
+				if(r < 0){
+					goto LAST;
+				}
+				if(dec->m2 != NULL){
+					dec->m2->set_round(dec->m2, prv->multi2_round);
+				}
+				dec->phase = 1;
 				if(check_ecm_complete(prv)){
 					curr += unit;
 					goto LAST;
 				}
 			}
+		}else{
+			dec->phase = 2;
 		}
+		
+	NEXT:
 		curr += unit;
 	}
 
@@ -1234,44 +1345,11 @@ LAST:
 	return r;
 }
 
-static int setup_multi2(ARIB_STD_B25_PRIVATE_DATA *prv)
+static int proc_ecm(DECRYPTOR_ELEM *dec, B_CAS_CARD *bcas)
 {
 	int r;
-	int i;
-	
-	uint32_t pid;
-	TS_PROGRAM *pgrm;
-
-	r = 0;
-
-	for(i=0;i<prv->p_count;i++){
-		pid = prv->program[i].ecm_pid;
-		if(pid == 0){
-			continue;
-		}
-		pgrm = prv->map[pid];
-		if(pgrm != (prv->program+i)){
-			prv->program[i].m2 = pgrm->m2;
-			pgrm->m2->add_ref(pgrm->m2);
-			continue;
-		}
-		r = proc_ecm(pgrm, prv->bcas);
-		if(r < 0){
-			return r;
-		}
-		if(pgrm->m2 != NULL){
-			pgrm->m2->set_round(pgrm->m2, prv->multi2_round);
-		}
-	}
-
-	return r;
-}
-
-static int proc_ecm(TS_PROGRAM *pgrm, B_CAS_CARD *bcas)
-{
-	int r;
-	int ofst;
-	int len;
+	int offset;
+	int length;
 
 	uint8_t *p;
 	
@@ -1284,30 +1362,30 @@ static int proc_ecm(TS_PROGRAM *pgrm, B_CAS_CARD *bcas)
 
 	r = 0;
 	
-	if(pgrm->m2 == NULL){
-		pgrm->m2 = create_multi2();
-		if(pgrm->m2 == NULL){
+	if(dec->m2 == NULL){
+		dec->m2 = create_multi2();
+		if(dec->m2 == NULL){
 			return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
 		}
 		r = bcas->get_init_status(bcas, &is);
 		if(r < 0){
 			return ARIB_STD_B25_ERROR_INVALID_B_CAS_STATUS;
 		}
-		pgrm->m2->set_system_key(pgrm->m2, is.system_key);
-		pgrm->m2->set_init_cbc(pgrm->m2, is.init_cbc);
+		dec->m2->set_system_key(dec->m2, is.system_key);
+		dec->m2->set_init_cbc(dec->m2, is.init_cbc);
 	}
 
-	ofst = 8;
-	len = pgrm->ecm_curr.hdr.section_length - (5+4);
-	p = pgrm->ecm_curr.buf.head + ofst;
+	offset = 8;
+	length = dec->ecm_curr.hdr.section_length - (5+4);
+	p = dec->ecm_curr.buf.head + offset;
 
-	r = bcas->proc_ecm(bcas, &res, p, len);
+	r = bcas->proc_ecm(bcas, &res, p, length);
 	if(r < 0){
-		pgrm->m2->clear_scramble_key(pgrm->m2);
+		dec->m2->clear_scramble_key(dec->m2);
 		return ARIB_STD_B25_ERROR_ECM_PROC_FAILURE;
 	}
 
-	pgrm->m2->set_scramble_key(pgrm->m2, res.scramble_key);
+	dec->m2->set_scramble_key(dec->m2, res.scramble_key);
 
 	return r;
 }
@@ -1319,14 +1397,15 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 
 	int32_t crypt;
 	int32_t unit;
-	uint32_t pid;
+	int32_t pid;
 
 	uint8_t *p;
 	uint8_t *curr;
 	uint8_t *tail;
 
-	TS_PROGRAM *pgrm;
 	TS_HEADER hdr;
+	DECRYPTOR_ELEM *dec;
+	TS_PROGRAM *pgrm;
 
 	unit = prv->unit_size;
 	curr = prv->sbuf.head;
@@ -1351,24 +1430,25 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 		extract_ts_header(&hdr, curr);
 		crypt = hdr.transport_scrambling_control;
 		pid = hdr.pid;
-		pgrm = prv->map[pid];
-		if(pgrm == NULL){
-			pgrm = prv->program + 0;
-		}
 		
 		p = curr+4;
-		
-		if(hdr.adaptation_field_control & 0x01){
+
+		if( (crypt != 0) &&
+		    (hdr.adaptation_field_control & 0x01) &&
+		    (prv->map[pid].type == PID_MAP_TYPE_OTHER) ){
+
+			dec = (DECRYPTOR_ELEM *)(prv->map[pid].target);
+
 			if(hdr.adaptation_field_control & 0x02){
 				p += (p[0]+1);
 			}
 			n = 188 - (p-curr);
 		
-			if( (crypt != 0) && (pgrm->m2 != NULL) ){
+			if( dec != NULL ){
 				if(hdr.payload_unit_start_indicator == 1){
 					r = 0;
 				}
-				m = pgrm->m2->decrypt(pgrm->m2, crypt, p, n);
+				m = dec->m2->decrypt(dec->m2, crypt, p, n);
 				if(m < 0){
 					r = ARIB_STD_B25_ERROR_DECRYPT_FAILURE;
 					goto LAST;
@@ -1382,27 +1462,28 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 			goto LAST;
 		}
 
-		if(pid == pgrm->ecm_pid){
-			r = set_ts_section_data(&(pgrm->ecm_next), &hdr, p, n);
+		if(prv->map[pid].type == PID_MAP_TYPE_ECM){
+			dec = (DECRYPTOR_ELEM *)(prv->map[pid].target);
+			r = set_ts_section_data(&(dec->ecm_next), &hdr, p, n);
 			if(r < 0){
 				goto LAST;
 			}
-			if(check_ts_section(&(pgrm->ecm_next))){
-				if( (!check_ts_section_crc(&(pgrm->ecm_next))) ||
-				    (pgrm->ecm_next.hdr.current_next_indicator == 0) ||
-				    (compare_ts_section(&(pgrm->ecm_curr), &(pgrm->ecm_next)) == 0) ){
-					reset_ts_section(&(pgrm->ecm_next));
-					curr += unit;
-					continue;
+			if(check_ts_section(&(dec->ecm_next))){
+				if( (!check_ts_section_crc(&(dec->ecm_next))) ||
+				    (dec->ecm_next.hdr.current_next_indicator == 0) ||
+				    (compare_ts_section(&(dec->ecm_curr), &(dec->ecm_next)) == 0) ){
+					reset_ts_section(&(dec->ecm_next));
+					goto NEXT;
 				}
-				swap_ts_section(&(pgrm->ecm_curr), &(pgrm->ecm_next));
-				reset_ts_section(&(pgrm->ecm_next));
-				r = proc_ecm(pgrm, prv->bcas);
+				swap_ts_section(&(dec->ecm_curr), &(dec->ecm_next));
+				reset_ts_section(&(dec->ecm_next));
+				r = proc_ecm(dec, prv->bcas);
 				if(r < 0){
 					goto LAST;
 				}
 			}
-		}else if(pid == pgrm->pmt_pid){
+		}else if(prv->map[pid].type == PID_MAP_TYPE_PMT){
+			pgrm = (TS_PROGRAM *)(prv->map[pid].target);
 			r = set_ts_section_data(&(pgrm->pmt_next), &hdr, p, n);
 			if(r < 0){
 				goto LAST;
@@ -1412,18 +1493,18 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 				    (pgrm->pmt_next.hdr.current_next_indicator == 0) ||
 				    (compare_ts_section(&(pgrm->pmt_curr), &(pgrm->pmt_next)) == 0) ){
 					reset_ts_section(&(pgrm->pmt_next));
-					curr += unit;
-					continue;
+					goto NEXT;
 				}
 				swap_ts_section(&(pgrm->pmt_curr), &(pgrm->pmt_next));
 				reset_ts_section(&(pgrm->pmt_next));
-				r = proc_pmt(pgrm);
+				r = proc_pmt(prv, pgrm);
 				if(r < 0){
 					goto LAST;
 				}
-				setup_pid_map(prv);
-				curr += unit;
-				goto LAST;
+				if(!check_ecm_complete(prv)){
+					curr += unit;
+					goto LAST;
+				}
 			}
 		}else if(pid == 0x0000){
 			r = set_ts_section_data(&(prv->pat_next), &hdr, p, n);
@@ -1435,8 +1516,7 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 				    (prv->pat_next.hdr.current_next_indicator == 0) ||
 				    (compare_ts_section(&(prv->pat_curr), &(prv->pat_next)) == 0)){
 					reset_ts_section(&(prv->pat_next));
-					curr += unit;
-					continue;
+					goto NEXT;
 				}
 				swap_ts_section(&(prv->pat_curr), &(prv->pat_next));
 				reset_ts_section(&(prv->pat_next));
@@ -1449,6 +1529,7 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 			}
 		}
 
+	NEXT:
 		curr += unit;
 	}
 
@@ -1467,23 +1548,187 @@ LAST:
 	return r;
 }
 
-static void release_program(TS_PROGRAM *pgrm)
+static void release_program(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 {
+	int32_t pid;
+	
+	TS_STREAM_ELEM *strm;
+	DECRYPTOR_ELEM *dec;
+
 	release_ts_section(&(pgrm->pmt_curr));
 	release_ts_section(&(pgrm->pmt_next));
 
-	release_ts_section(&(pgrm->ecm_curr));
-	release_ts_section(&(pgrm->ecm_next));
+	while( (strm = get_stream_list_head(&(pgrm->streams))) != NULL ){
+		pid = strm->pid;
+		prv->map[pid].ref -= 1;
+		if( prv->map[pid].ref < 1 ){
+			if( (prv->map[pid].type == PID_MAP_TYPE_OTHER) &&
+			    (prv->map[pid].target != NULL) ){
+				dec = (DECRYPTOR_ELEM *)(prv->map[pid].target);
+				dec->ref -= 1;
+				if(dec->ref < 1){
+					remove_decryptor(prv, dec);
+				}
+			}
+			prv->map[pid].type = PID_MAP_TYPE_UNKNOWN;
+			prv->map[pid].ref = 0;
+			prv->map[pid].target = NULL;
+		}
+		memset(strm, 0, sizeof(TS_STREAM_ELEM));
+		put_stream_list_tail(&(prv->strm_pool), strm);
+	}
+}
 
-	if(pgrm->streams != NULL){
-		free(pgrm->streams);
-		pgrm->streams = NULL;
+static DECRYPTOR_ELEM *set_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, int32_t pid)
+{
+	DECRYPTOR_ELEM *r;
+
+	r = NULL;
+	if(prv->map[pid].type == PID_MAP_TYPE_ECM){
+		r = (DECRYPTOR_ELEM *)(prv->map[pid].target);
+		if(r != NULL){
+			return r;
+		}
+	}
+	r = (DECRYPTOR_ELEM *)calloc(1, sizeof(DECRYPTOR_ELEM));
+	if(r == NULL){
+		return NULL;
+	}
+	r->ecm_pid = pid;
+
+	if(prv->decrypt.tail != NULL){
+		r->prev = prv->decrypt.tail;
+		r->next = NULL;
+		prv->decrypt.tail->next = r;
+		prv->decrypt.tail = r;
+		prv->decrypt.count += 1;
+	}else{
+		r->prev = NULL;
+		r->next = NULL;
+		prv->decrypt.head = r;
+		prv->decrypt.tail = r;
+		prv->decrypt.count = 1;
 	}
 
-	if(pgrm->m2 != NULL){
-		pgrm->m2->release(pgrm->m2);
-		pgrm->m2 = NULL;
+	prv->map[pid].ref = 1;
+	prv->map[pid].type = PID_MAP_TYPE_ECM;
+	prv->map[pid].target = r;
+
+	return r;
+}
+
+static void remove_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, DECRYPTOR_ELEM *dec)
+{
+	int32_t pid;
+
+	DECRYPTOR_ELEM *prev;
+	DECRYPTOR_ELEM *next;
+
+	pid = dec->ecm_pid;
+	if(prv->map[pid].type != PID_MAP_TYPE_ECM){
+		/* invalid param - do nothing */
+		return;
 	}
+
+	prv->map[pid].ref = 0;
+	prv->map[pid].type = PID_MAP_TYPE_UNKNOWN;
+	prv->map[pid].target = NULL;
+
+	prev = (DECRYPTOR_ELEM *)(dec->prev);
+	next = (DECRYPTOR_ELEM *)(dec->next);
+	if(prev != NULL){
+		prev->next = next;
+	}else{
+		prv->decrypt.head = next;
+	}
+	if(next != NULL){
+		next->prev = prev;
+	}else{
+		prv->decrypt.tail = prev;
+	}
+	prv->decrypt.count -= 1;
+
+	release_ts_section(&(dec->ecm_curr));
+	release_ts_section(&(dec->ecm_next));
+
+	if(dec->m2 != NULL){
+		dec->m2->release(dec->m2);
+		dec->m2 = NULL;
+	}
+
+	free(dec);
+}
+
+static TS_STREAM_ELEM *get_stream_list_head(TS_STREAM_LIST *list)
+{
+	TS_STREAM_ELEM *r;
+
+	r = list->head;
+	if(r == NULL){
+		return NULL;
+	}
+
+	list->head = (TS_STREAM_ELEM *)(r->next);
+	if(list->head == NULL){
+		list->tail = NULL;
+		list->count = 0;
+	}else{
+		list->head->prev = NULL;
+		list->count -= 1;
+	}
+
+	r->prev = NULL;
+	r->next = NULL;
+
+	return r;
+}
+
+static TS_STREAM_ELEM *create_stream_elem(int32_t pid, int32_t type)
+{
+	TS_STREAM_ELEM *r;
+
+	r = (TS_STREAM_ELEM *)calloc(1, sizeof(TS_STREAM_ELEM));
+	if(r == NULL){
+		return NULL;
+	}
+
+	r->pid = pid;
+	r->type = type;
+
+	return r;
+}
+
+static void put_stream_list_tail(TS_STREAM_LIST *list, TS_STREAM_ELEM *elem)
+{
+	if(list->tail != NULL){
+		elem->prev = list->tail;
+		elem->next = NULL;
+		list->tail->next = elem;
+		list->tail = elem;
+		list->count += 1;
+	}else{
+		elem->prev = NULL;
+		elem->next = NULL;
+		list->head = elem;
+		list->tail = elem;
+		list->count = 1;
+	}
+}
+
+static void clear_stream_list(TS_STREAM_LIST *list)
+{
+	TS_STREAM_ELEM *p,*n;
+
+	p = list->head;
+	while(p != NULL){
+		n = (TS_STREAM_ELEM *)(p->next);
+		free(p);
+		p = n;
+	}
+
+	list->head = NULL;
+	list->tail = NULL;
+	list->count = 0;
 }
 
 static int reserve_work_buffer(TS_WORK_BUFFER *buf, int32_t size)
