@@ -652,26 +652,45 @@ static void extract_power_on_ctrl_response(B_CAS_PWR_ON_CTRL *dst, uint8_t *src)
 
 static void extract_mjd(int *yy, int *mm, int *dd, int mjd)
 {
-	int yd;
-	int md;
-	int d;
-
-	yd = (int)floor( (mjd-15078.2) / 365.25 );
-	md = (int)floor( ((mjd-14956.1) - (yd*365.25)) / 30.6001 );
-	d = mjd - 14956 - (int)floor(yd*365.25) - (int)floor(md*30.6001);
-	if( md > 13 ){
-		*dd = d;
-		*mm = md-13;
-		*yy = 1900+yd+1;
-	}else{
-		*dd = d;
-		*mm = md-1;
-		*yy = 1900+yd;
+	int a1,m1;
+	int a2,m2;
+	int a3,m3;
+	int a4,m4;
+	int mw;
+	int dw;
+	int yw;
+	
+	mjd -= 51604; // 2000,3/1
+	if(mjd < 0){
+		mjd += 0x10000;
 	}
 
-	if(*yy < 2000){ /* mjd bit overflow - retry */
-		extract_mjd(yy, mm, dd, mjd+0x10000);
+	a1 = mjd / 146097;
+	m1 = mjd % 146097;
+	a2 = m1 / 36524;
+	m2 = m1 - (a2 * 36524);
+	a3 = m2 / 1461;
+	m3 = m2 - (a3 * 1461);
+	a4 = m3 / 365;
+	if(a4 > 3){
+		a4 = 3;
 	}
+	m4 = m3 - (a4 * 365);
+	
+	mw = (1071*m4+450) >> 15;
+	dw = m4 - ((979*mw+16) >> 5);
+
+	yw = a1*400 + a2*100 + a3*4 + a4 + 2000;
+	mw += 3;
+	if(mw > 12){
+		mw -= 12;
+		yw += 1;
+	}
+	dw += 1;
+
+	*yy = yw;
+	*mm = mw;
+	*dd = dw;
 }
 
 static int setup_ecm_receive_command(uint8_t *dst, uint8_t *src, int len)

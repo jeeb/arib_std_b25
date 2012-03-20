@@ -54,7 +54,7 @@ int main(int argc, char **argv)
 
 static void show_usage()
 {
-	fprintf(stderr, "b25 - ARIB STD-B25 test program ver. 0.2.1 (2008, 4/9)\n");
+	fprintf(stderr, "b25 - ARIB STD-B25 test program ver. 0.2.2 (2008, 11/10)\n");
 	fprintf(stderr, "usage: b25 [options] src.m2t dst.m2t\n");
 	fprintf(stderr, "options:\n");
 	fprintf(stderr, "  -r round (integer, default=4)\n");
@@ -222,10 +222,6 @@ static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 	while( (n = _read(sfd, data, sizeof(data))) > 0 ){
 		sbuf.data = data;
 		sbuf.size = n;
-
-		if(offset == 0x000000006dfd2000){
-			offset = 0x000000006dfd2000;
-		}
 
 		code = b25->put(b25, &sbuf);
 		if(code < 0){

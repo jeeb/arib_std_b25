@@ -404,8 +404,6 @@ static void release_work_buffer(TS_WORK_BUFFER *buf);
 static void extract_ts_header(TS_HEADER *dst, uint8_t *src);
 static void extract_emm_fixed_part(EMM_FIXED_PART *dst, uint8_t *src);
 
-static int check_unit_invert(unsigned char *head, unsigned char *tail);
-
 static uint8_t *resync(uint8_t *head, uint8_t *tail, int32_t unit);
 static uint8_t *resync_force(uint8_t *head, uint8_t *tail, int32_t unit);
 
@@ -985,66 +983,49 @@ static int select_unit_size(ARIB_STD_B25_PRIVATE_DATA *prv)
 {
 	int i;
 	int m,n,w;
-	int count[320];
+	int count[320-188];
 
 	unsigned char *head;
-	unsigned char *pre;
 	unsigned char *buf;
 	unsigned char *tail;
 
 	head = prv->sbuf.head;
 	tail = prv->sbuf.tail;
-	pre = NULL;
+	
 	buf = head;
 	memset(count, 0, sizeof(count));
 
-	// 1st step, find head 0x47
-	while(buf < tail){
-		if(buf[0] == 0x47){
-			pre = buf;
-			break;
+	// 1st step, count up 0x47 interval
+	while( (buf+188) < tail ){
+		if(buf[0] != 0x47){
+			buf += 1;
+			continue;
 		}
-		buf += 1;
-	}
-
-	if(pre == NULL){
-		return ARIB_STD_B25_ERROR_NON_TS_INPUT_STREAM;
-	}
-
-	// 2nd step, count up 0x47 interval
-	buf = pre + 1;
-	while( buf < tail ){
-		if(buf[0] == 0x47){
-			m = buf - pre;
-			if(m < 188){
-				n = check_unit_invert(head, buf);
-				if( (n >= 188) && (n < 320) ){
-					count[n] += 1;
-					pre = buf;
-				}
-			}else if(m < 320){
-				count[m] += 1;
-				pre = buf;
-			}else{
-				pre = buf;
+		m = 320;
+		if( buf+m > tail ){
+			m = tail-buf;
+		}
+		for(i=188;i<m;i++){
+			if(buf[i] == 0x47){
+				count[i-188] += 1;
 			}
 		}
 		buf += 1;
 	}
 
-	// 3rd step, select maximum appeared interval
+	// 2nd step, select maximum appeared interval
 	m = 0;
 	n = 0;
 	for(i=188;i<320;i++){
-		if(m < count[i]){
-			m = count[i];
+		if(m < count[i-188]){
+			m = count[i-188];
 			n = i;
 		}
 	}
 
-	// 4th step, verify unit_size
+	// 3rd step, verify unit_size
 	w = m*n;
-	if( (m < 8) || (w < ((tail-head) - (w/8))) ){
+	if( (m < 8) || ((w+3*n) < (tail-head)) ){
 		return ARIB_STD_B25_ERROR_NON_TS_INPUT_STREAM;
 	}
 
@@ -2524,22 +2505,6 @@ static void extract_emm_fixed_part(EMM_FIXED_PART *dst, uint8_t *src)
 	dst->broadcaster_group_id          = src[ 8];
 	dst->update_number                 = (src[ 9]<<8)|src[10];
 	dst->expiration_date               = (src[11]<<8)|src[12];
-}
-
-static int check_unit_invert(unsigned char *head, unsigned char *tail)
-{
-	unsigned char *buf;
-
-	buf = tail-188;
-
-	while(head <= buf){
-		if(buf[0] == 0x47){
-			return tail-buf;
-		}
-		buf -= 1;
-	}
-
-	return 0;
 }
 
 static uint8_t *resync(uint8_t *head, uint8_t *tail, int32_t unit_size)
