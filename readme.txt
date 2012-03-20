@@ -4,7 +4,7 @@
 
 【バージョン】
 
-　0.1.5
+　0.1.6
 
 【作者】
 
@@ -13,11 +13,11 @@
 
 【一次配布元】
 
-　http://www.marumo.ne.jp/db2008_2.htm#12
+　http://www.marumo.ne.jp/db2008_3.htm#16
 
 　あるいは
 
-　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.5.lzh
+　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.6.lzh
 
 【目的】
 
@@ -153,7 +153,7 @@
 　　　　各 ECM に対して、最初のセクションデータが到着した時点で
 　　　　MULTI2 モジュールのインスタンスをデクリプタ上に作成する
 　　　　ECM セクションデータは B_CAS_CARD モジュールに提供して
-　　　　スクランブル鍵を受け取り、MULTi2 モジュールにシステム鍵、
+　　　　スクランブル鍵を受け取り、MULTI2 モジュールにシステム鍵、
 　　　　初期 CBC 状態、スクランブル鍵を渡し、MULTI2 復号の準備を
 　　　　行う
 
@@ -179,6 +179,15 @@
 　　1 各モジュールが確保したリソースを解放する
 
 【更新履歴】
+
+　・2008, 3/16 - ver. 0.1.6
+
+　　PMT 更新の際、ECM 関連の状況が変更 (スクランブル - ノンスク
+　　ランブルの切り替えや、ECM PID の変更等) が行われても、それが
+　　反映されていなかった
+
+　　http://www.marumo.ne.jp/db2008_3.htm#16 又は
+　　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.6.lzh
 
 　・2008, 2/14
 

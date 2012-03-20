@@ -393,6 +393,8 @@ static void unref_stream(ARIB_STD_B25_PRIVATE_DATA *prv, int32_t pid);
 
 static DECRYPTOR_ELEM *set_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, int32_t pid);
 static void remove_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, DECRYPTOR_ELEM *dec);
+static DECRYPTOR_ELEM *select_active_decryptor(DECRYPTOR_ELEM *a, DECRYPTOR_ELEM *b, int32_t pid);
+static void bind_stream_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, int32_t pid, DECRYPTOR_ELEM *dec);
 
 static TS_STREAM_ELEM *get_stream_list_head(TS_STREAM_LIST *list);
 static TS_STREAM_ELEM *find_stream_list_elem(TS_STREAM_LIST *list, int32_t pid);
@@ -1200,6 +1202,7 @@ static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 	int32_t type;
 
 	DECRYPTOR_ELEM *dec[2];
+	DECRYPTOR_ELEM *dw;
 	
 	TS_STREAM_ELEM *strm;
 
@@ -1281,20 +1284,12 @@ static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 			strm->type = type;
 		}
 		
+		prv->map[pid].type = PID_MAP_TYPE_OTHER;
 		prv->map[pid].ref += 1;
-		if(prv->map[pid].ref == 1){
-			prv->map[pid].type = PID_MAP_TYPE_OTHER;
-			if( dec[1] != NULL ){
-				prv->map[pid].target = dec[1];
-				dec[1]->ref += 1;
-			}else if( (dec[0] != NULL) && (ecm_pid == 0) ){
-				prv->map[pid].target = dec[0];
-				dec[0]->ref += 1;
-			}else{
-				prv->map[pid].target = NULL;
-			}
-		}
 
+		dw = select_active_decryptor(dec[0], dec[1], ecm_pid);
+		bind_stream_decryptor(prv, pid, dw);
+		
 		put_stream_list_tail(&(pgrm->streams), strm);
 	}
 
@@ -1815,6 +1810,41 @@ static void remove_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, DECRYPTOR_ELEM *dec
 	}
 
 	free(dec);
+}
+
+static DECRYPTOR_ELEM *select_active_decryptor(DECRYPTOR_ELEM *a, DECRYPTOR_ELEM *b, int32_t pid)
+{
+	if( b != NULL ){
+		return b;
+	}
+	if( pid == 0x1fff ){
+		return NULL;
+	}
+	return a;
+}
+
+static void bind_stream_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, int32_t pid, DECRYPTOR_ELEM *dec)
+{
+	DECRYPTOR_ELEM *old;
+
+	old = (DECRYPTOR_ELEM *)(prv->map[pid].target);
+	if(old == dec){
+		/* already binded - do nothing */
+		return;
+	}
+		 
+	if(old != NULL){
+		old->ref -= 1;
+		if(old->ref == 0){
+			remove_decryptor(prv, old);
+		}
+		prv->map[pid].target = NULL;
+	}
+
+	if(dec != NULL){
+		prv->map[pid].target = dec;
+		dec->ref += 1;
+	}
 }
 
 static TS_STREAM_ELEM *get_stream_list_head(TS_STREAM_LIST *list)
