@@ -8,6 +8,7 @@ typedef struct {
 	uint8_t  init_cbc[8];
 	int64_t  bcas_card_id;
 	int32_t  card_status;
+	int32_t  ca_system_id;
 } B_CAS_INIT_STATUS;
 
 typedef struct {

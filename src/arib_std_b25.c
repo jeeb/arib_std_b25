@@ -106,6 +106,7 @@ typedef struct {
 
 	B_CAS_CARD        *bcas;
 	B_CAS_ID           casid;
+	int32_t            ca_system_id;
 
 	int32_t            emm_pid;
 	TS_SECTION_PARSER *emm;
@@ -370,7 +371,7 @@ static int proc_pat(ARIB_STD_B25_PRIVATE_DATA *prv);
 static int check_pmt_complete(ARIB_STD_B25_PRIVATE_DATA *prv);
 static int find_pmt(ARIB_STD_B25_PRIVATE_DATA *prv);
 static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm);
-static int32_t find_ca_descriptor_pid(uint8_t *head, uint8_t *tail);
+static int32_t find_ca_descriptor_pid(uint8_t *head, uint8_t *tail, int32_t ca_system_id);
 static int32_t add_ecm_stream(ARIB_STD_B25_PRIVATE_DATA *prv, TS_STREAM_LIST *list, int32_t ecm_pid);
 static int check_ecm_complete(ARIB_STD_B25_PRIVATE_DATA *prv);
 static int find_ecm(ARIB_STD_B25_PRIVATE_DATA *prv);
@@ -470,6 +471,7 @@ static int set_emm_proc_arib_std_b25(void *std_b25, int32_t on)
 static int set_b_cas_card_arib_std_b25(void *std_b25, B_CAS_CARD *bcas)
 {
 	int n;
+	B_CAS_INIT_STATUS is;
 	ARIB_STD_B25_PRIVATE_DATA *prv;
 
 	prv = private_data(std_b25);
@@ -479,6 +481,11 @@ static int set_b_cas_card_arib_std_b25(void *std_b25, B_CAS_CARD *bcas)
 
 	prv->bcas = bcas;
 	if(prv->bcas != NULL){
+		n = prv->bcas->get_init_status(bcas, &is);
+		if(n < 0){
+			return ARIB_STD_B25_ERROR_INVALID_B_CAS_STATUS;
+		}
+		prv->ca_system_id = is.ca_system_id;
 		n = prv->bcas->get_id(prv->bcas, &(prv->casid));
 		if(n < 0){
 			return ARIB_STD_B25_ERROR_INVALID_B_CAS_STATUS;
@@ -1376,7 +1383,7 @@ static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 	}
 
 	/* find major ecm_pid and regist decryptor */
-	ecm_pid = find_ca_descriptor_pid(head, head+length);
+	ecm_pid = find_ca_descriptor_pid(head, head+length, prv->ca_system_id);
 	if( (ecm_pid != 0) && (ecm_pid != 0x1fff) ){
 		dec[0] = set_decryptor(prv, ecm_pid);
 		if(dec[0] == NULL){
@@ -1412,7 +1419,7 @@ static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 		pid = ((head[1] << 8) | head[2]) & 0x1fff;
 		length = ((head[3] << 8) | head[4]) & 0x0fff;
 		head += 5;
-		ecm_pid = find_ca_descriptor_pid(head, head+length);
+		ecm_pid = find_ca_descriptor_pid(head, head+length, prv->ca_system_id);
 		head += length;
 		
 		if( (ecm_pid != 0) && (ecm_pid != 0x1fff) ){
@@ -1469,7 +1476,7 @@ LAST:
 	return 0;
 }
 		
-static int32_t find_ca_descriptor_pid(uint8_t *head, uint8_t *tail)
+static int32_t find_ca_descriptor_pid(uint8_t *head, uint8_t *tail, int32_t ca_system_id)
 {
 	uint32_t ca_pid;
 	uint32_t ca_sys_id;
@@ -1486,7 +1493,9 @@ static int32_t find_ca_descriptor_pid(uint8_t *head, uint8_t *tail)
 		    (head+len <= tail) ){
 			ca_sys_id = ((head[0] << 8) | head[1]);
 			ca_pid = ((head[2] << 8) | head[3]) & 0x1fff;
-			return ca_pid;
+			if(ca_sys_id == ca_system_id){
+				return ca_pid;
+			}
 		}
 		head += len;
 	}
@@ -2003,7 +2012,7 @@ static int proc_cat(ARIB_STD_B25_PRIVATE_DATA *prv)
 		goto LAST;
 	}
 
-	emm_pid = find_ca_descriptor_pid(sect.data, sect.tail-4);
+	emm_pid = find_ca_descriptor_pid(sect.data, sect.tail-4, prv->ca_system_id);
 	if( (emm_pid != 0x0000) && (emm_pid != 0x1fff) ){
 		if( (prv->map[emm_pid].target != NULL) &&
 		    (prv->map[emm_pid].type == PID_MAP_TYPE_OTHER) ){

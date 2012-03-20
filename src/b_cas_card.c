@@ -625,6 +625,7 @@ static int connect_card(B_CAS_CARD_PRIVATE_DATA *prv, const char *reader_name)
 	memcpy(prv->stat.init_cbc, p+48, 8);
 	prv->stat.bcas_card_id = load_be_uint48(p+8);
 	prv->stat.card_status = load_be_uint16(p+2);
+	prv->stat.ca_system_id = load_be_uint16(p+6);
 
 	return 1;
 }

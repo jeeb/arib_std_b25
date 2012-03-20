@@ -4,7 +4,7 @@
 
 【バージョン】
 
-　0.2.2
+　0.2.3
 
 【作者】
 
@@ -13,11 +13,11 @@
 
 【一次配布元】
 
-　http://www.marumo.ne.jp/db2008_4.htm#09
+　http://www.marumo.ne.jp/db2008_c.htm#30
 
 　あるいは
 
-　http://www.marumo.ne.jp/junk/arib_std_b25-0.2.1.lzh
+　http://www.marumo.ne.jp/junk/arib_std_b25-0.2.3.lzh
 
 【目的】
 
@@ -191,14 +191,22 @@
 
 【更新履歴】
 
-　・2008, 11/10 - ver. 11/10
+　・2008, 12/30 - ver. 0.2.3
+
+　　CA_descriptor の解釈を行う際に CA_system_id が B-CAS カード
+　　から取得したものと一致するか確認を行うように変更
+
+　　http://www.marumo.ne.jp/db2008_c.htm#30 又は
+　　http://www.marumo.ne.jp/junk/arib_std_b25-0.2.3.lzh
+
+　・2008, 11/10 - ver. 0.2.2
 
 　　修正ユリウス日から年月日への変換処理をより正確なものへ変更
 
 　　TS パケットサイズの特定方法を変更
 
 　　http://www.marumo.ne.jp/db2008_b.htm#10 又は
-　　http://www.marumo.ne.jp/junk/arib_std_b25-0.2.1.lzh
+　　http://www.marumo.ne.jp/junk/arib_std_b25-0.2.2.lzh
 
 　・2008, 4/9 - ver. 0.2.1
 
