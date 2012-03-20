@@ -50,7 +50,7 @@ int main(int argc, char **argv)
 
 static void show_usage()
 {
-	fprintf(stderr, "b25 - ARIB STD-B25 test program ver. 0.1.9 (2008, 3/31)\n");
+	fprintf(stderr, "b25 - ARIB STD-B25 test program ver. 0.2.0 (2008, 4/6)\n");
 	fprintf(stderr, "usage: b25 [options] src.m2t dst.m2t\n");
 	fprintf(stderr, "options:\n");
 	fprintf(stderr, "  -r round (integer, default=4)\n");
@@ -99,8 +99,11 @@ static int parse_arg(OPTION *dst, int argc, char **argv)
 
 static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 {
-	int code,i,n;
+	int code,i,n,m;
 	int sfd,dfd;
+
+	int64_t total;
+	int64_t offset;
 
 	ARIB_STD_B25 *b25;
 	B_CAS_CARD   *bcas;
@@ -122,6 +125,10 @@ static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 		fprintf(stderr, "error - failed on _open(%s) [src]\n", src);
 		goto LAST;
 	}
+	
+	_lseeki64(sfd, 0, SEEK_END);
+	total = _telli64(sfd);
+	_lseeki64(sfd, 0, SEEK_SET);
 
 	b25 = create_arib_std_b25();
 	if(b25 == NULL){
@@ -165,6 +172,7 @@ static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 		goto LAST;
 	}
 
+	offset = 0;
 	while( (n = _read(sfd, data, sizeof(data))) > 0 ){
 		sbuf.data = data;
 		sbuf.size = n;
@@ -188,6 +196,10 @@ static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 				goto LAST;
 			}
 		}
+		
+		offset += sbuf.size;
+		m = (int)(10000*offset/total);
+		fprintf(stderr, "\rprocessing: %2d.%02d%% ", m/100, m%100);
 	}
 
 	code = b25->flush(b25);
@@ -209,6 +221,8 @@ static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 			goto LAST;
 		}
 	}
+
+	fprintf(stderr, "\rprocessing: finish\n");
 
 	n = b25->get_program_count(b25);
 	if(n < 0){

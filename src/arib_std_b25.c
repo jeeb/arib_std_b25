@@ -4,21 +4,12 @@
 #include "arib_std_b25.h"
 #include "arib_std_b25_error_code.h"
 #include "multi2.h"
+#include "ts_common_types.h"
+#include "ts_section_parser.h"
 
 /*+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  inner structures
  ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
-typedef struct {
-	int32_t           sync;                           /*  0- 7 :  8 bits */
-	int32_t           transport_error_indicator;      /*  8- 8 :  1 bit  */
-	int32_t           payload_unit_start_indicator;   /*  9- 9 :  1 bit  */
-	int32_t           transport_priority;             /* 10-10 :  1 bits */
-	int32_t           pid;                            /* 11-23 : 13 bits */
-	int32_t           transport_scrambling_control;   /* 24-25 :  2 bits */
-	int32_t           adaptation_field_control;       /* 26-27 :  2 bits */
-	int32_t           continuity_counter;             /* 28-31 :  4 bits */
-} TS_HEADER;
-
 typedef struct {
 	int32_t           pid;
 	int32_t           type;
@@ -42,103 +33,95 @@ typedef struct {
 } TS_WORK_BUFFER;
 
 typedef struct {
-	
-	int32_t           table_id;                       /*  0- 7 :  8 bits */
-	int32_t           section_syntax_indicator;       /*  8- 8 :  1 bit  */
-	int32_t           private_indicator;              /*  9- 9 :  1 bit  */
-	int32_t           section_length;                 /* 12-23 : 12 bits */
-	int32_t           transport_stream_id;            /* 24-47 : 16 bits */
-	int32_t           version_number;                 /* 50-54 :  5 bits */
-	int32_t           current_next_indicator;         /* 55-55 :  1 bit  */
-	int32_t           section_number;                 /* 56-63 :  8 bits */
-	int32_t           last_section_number;            /* 64-71 :  8 bits */
-	
-} TS_SECTION_HEADER;
 
-typedef struct {
+	int32_t            phase;
 
-	TS_WORK_BUFFER    buf; /* for raw data      */
-	TS_SECTION_HEADER hdr; /* for parsed header */
+	int32_t            program_number;
 
-} TS_SECTION;
+	int32_t            pmt_pid;
+	TS_SECTION_PARSER *pmt;
 
-typedef struct {
+	int32_t            pcr_pid;
 
-	int32_t           phase;
-
-	int32_t           program_number;
-	
-	int32_t           pmt_pid;
-	TS_SECTION        pmt_curr;
-	TS_SECTION        pmt_next;
-
-	int32_t           pcr_pid;
-
-	TS_STREAM_LIST    streams;
-	TS_STREAM_LIST    old_strm;
+	TS_STREAM_LIST     streams;
+	TS_STREAM_LIST     old_strm;
 
 } TS_PROGRAM;
 
 typedef struct {
 
-	int32_t           ref;
-	int32_t           phase;
+	int32_t            ref;
+	int32_t            phase;
 
-	int32_t           ecm_pid;
-	TS_SECTION        ecm_curr;
-	TS_SECTION        ecm_next;
+	int32_t            locked;
 
-	MULTI2           *m2;
+	int32_t            ecm_pid;
+	TS_SECTION_PARSER *ecm;
 
-	int32_t           unpurchased;
-	int32_t           last_error;
+	MULTI2            *m2;
 
-	void             *prev;
-	void             *next;
+	int32_t            unpurchased;
+	int32_t            last_error;
+
+	void              *prev;
+	void              *next;
 
 } DECRYPTOR_ELEM;
 
 typedef struct {
-	DECRYPTOR_ELEM   *head;
-	DECRYPTOR_ELEM   *tail;
-	int32_t           count;
+	DECRYPTOR_ELEM    *head;
+	DECRYPTOR_ELEM    *tail;
+	int32_t            count;
 } DECRYPTOR_LIST;
 
 typedef struct {
-	uint32_t          ref;
-	uint32_t          type;
-	int64_t           normal_packet;
-	int64_t           undecrypted;
-	void             *target;
+	uint32_t           ref;
+	uint32_t           type;
+	int64_t            normal_packet;
+	int64_t            undecrypted;
+	void              *target;
 } PID_MAP;
 
 typedef struct {
 
-	int32_t           multi2_round;
-	int32_t           strip;
+	int32_t            multi2_round;
+	int32_t            strip;
 	
-	int32_t           unit_size;
+	int32_t            unit_size;
 
-	int32_t           sbuf_offset;
+	int32_t            sbuf_offset;
 
-	TS_SECTION        pat_curr;
-	TS_SECTION        pat_next;
+	TS_SECTION_PARSER *pat;
+	TS_SECTION_PARSER *cat;
 
-	TS_STREAM_LIST    strm_pool;
+	TS_STREAM_LIST     strm_pool;
 	
-	int32_t           p_count;
-	TS_PROGRAM       *program;
+	int32_t            p_count;
+	TS_PROGRAM        *program;
 
-	DECRYPTOR_LIST    decrypt;
+	DECRYPTOR_LIST     decrypt;
 
-	PID_MAP           map[0x2000];
+	PID_MAP            map[0x2000];
 
-	B_CAS_CARD       *bcas;
+	B_CAS_CARD        *bcas;
+	B_CAS_ID           casid;
 
-	TS_WORK_BUFFER    sbuf;
-	TS_WORK_BUFFER    dbuf;
+	int32_t            emm_pid;
+	TS_SECTION_PARSER *emm;
+
+	TS_WORK_BUFFER     sbuf;
+	TS_WORK_BUFFER     dbuf;
 	
 } ARIB_STD_B25_PRIVATE_DATA;
+
+typedef struct {
+	int64_t            card_id;
+	int32_t            associated_information_length;
+	int32_t            protocol_number;
+	int32_t            broadcaster_group_id;
+	int32_t            update_number;
+	int32_t            expiration_date;
+} EMM_FIXED_PART;
 
 /*+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  constant values
@@ -167,7 +150,7 @@ enum TS_STREAM_TYPE {
 };
 
 enum TS_SECTION_ID {
-	TS_SECTION_ID_PROGRAM_ASSOCATION            = 0x00,
+	TS_SECTION_ID_PROGRAM_ASSOCIATION           = 0x00,
 	TS_SECTION_ID_CONDITIONAL_ACCESS            = 0x01,
 	TS_SECTION_ID_PROGRAM_MAP                   = 0x02,
 	TS_SECTION_ID_DESCRIPTION                   = 0x03,
@@ -198,7 +181,7 @@ enum TS_SECTION_ID {
 	TS_SECTION_ID_ECM_S                         = 0x82,
 	TS_SECTION_ID_ECM                           = 0x83,
 	TS_SECTION_ID_EMM_S                         = 0x84,
-	TS_SECTION_ID_EMM                           = 0x85,
+	TS_SECTION_ID_EMM_MESSAGE                   = 0x85,
 	TS_SECTION_ID_DCT                           = 0xc0,
 	TS_SECTION_ID_DLT                           = 0xc1,
 	TS_SECTION_ID_PCAT                          = 0xc2,
@@ -318,6 +301,7 @@ enum PID_MAP_TYPE {
 	PID_MAP_TYPE_ECM                            = 0x0500,
 	PID_MAP_TYPE_EMM                            = 0x0600,
 	PID_MAP_TYPE_EIT                            = 0x0700,
+	PID_MAP_TYPE_CAT                            = 0x0800,
 	PID_MAP_TYPE_OTHER                          = 0xff00,
 };
 
@@ -387,8 +371,11 @@ static int32_t find_ca_descriptor_pid(uint8_t *head, uint8_t *tail);
 static int32_t add_ecm_stream(ARIB_STD_B25_PRIVATE_DATA *prv, TS_STREAM_LIST *list, int32_t ecm_pid);
 static int check_ecm_complete(ARIB_STD_B25_PRIVATE_DATA *prv);
 static int find_ecm(ARIB_STD_B25_PRIVATE_DATA *prv);
-static int proc_ecm(DECRYPTOR_ELEM *dec, B_CAS_CARD *bcas);
+static int proc_ecm(DECRYPTOR_ELEM *dec, B_CAS_CARD *bcas, int32_t multi2_round);
 static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv);
+
+static int proc_cat(ARIB_STD_B25_PRIVATE_DATA *prv);
+static int proc_emm(ARIB_STD_B25_PRIVATE_DATA *prv);
 
 static void release_program(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm);
 
@@ -398,6 +385,7 @@ static DECRYPTOR_ELEM *set_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, int32_t pid
 static void remove_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, DECRYPTOR_ELEM *dec);
 static DECRYPTOR_ELEM *select_active_decryptor(DECRYPTOR_ELEM *a, DECRYPTOR_ELEM *b, int32_t pid);
 static void bind_stream_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, int32_t pid, DECRYPTOR_ELEM *dec);
+static void unlock_all_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv);
 
 static TS_STREAM_ELEM *get_stream_list_head(TS_STREAM_LIST *list);
 static TS_STREAM_ELEM *find_stream_list_elem(TS_STREAM_LIST *list, int32_t pid);
@@ -410,16 +398,8 @@ static int append_work_buffer(TS_WORK_BUFFER *buf, uint8_t *data, int32_t size);
 static void reset_work_buffer(TS_WORK_BUFFER *buf);
 static void release_work_buffer(TS_WORK_BUFFER *buf);
 
-static int set_ts_section_data(TS_SECTION *sect, TS_HEADER *hdr, uint8_t *data, int32_t size);
-static int check_ts_section(TS_SECTION *sect);
-static int check_ts_section_crc(TS_SECTION *sect);
-static void reset_ts_section(TS_SECTION *sect);
-static void swap_ts_section(TS_SECTION *curr, TS_SECTION *next);
-static int compare_ts_section(TS_SECTION *curr, TS_SECTION *next);
-static void release_ts_section(TS_SECTION *sect);
-
 static void extract_ts_header(TS_HEADER *dst, uint8_t *src);
-static void extract_ts_section_header(TS_SECTION_HEADER *dst, uint8_t *head);
+static void extract_emm_fixed_part(EMM_FIXED_PART *dst, uint8_t *src);
 
 static int check_unit_invert(unsigned char *head, unsigned char *tail);
 
@@ -474,6 +454,7 @@ static int set_strip_arib_std_b25(void *std_b25, int32_t strip)
 
 static int set_b_cas_card_arib_std_b25(void *std_b25, B_CAS_CARD *bcas)
 {
+	int n;
 	ARIB_STD_B25_PRIVATE_DATA *prv;
 
 	prv = private_data(std_b25);
@@ -482,6 +463,12 @@ static int set_b_cas_card_arib_std_b25(void *std_b25, B_CAS_CARD *bcas)
 	}
 
 	prv->bcas = bcas;
+	if(prv->bcas != NULL){
+		n = prv->bcas->get_id(prv->bcas, &(prv->casid));
+		if(n < 0){
+			return ARIB_STD_B25_ERROR_INVALID_B_CAS_STATUS;
+		}
+	}
 
 	return 0;
 }
@@ -608,71 +595,129 @@ static int flush_arib_std_b25(void *std_b25)
 
 		if(prv->map[pid].type == PID_MAP_TYPE_ECM){
 			dec = (DECRYPTOR_ELEM *)(prv->map[pid].target);
-			r = set_ts_section_data(&(dec->ecm_next), &hdr, p, n);
-			if(r < 0){
+			if( (dec == NULL) || (dec->ecm == NULL) ){
+				/* this code will never execute */
+				r = ARIB_STD_B25_ERROR_ECM_PARSE_FAILURE;
 				goto LAST;
 			}
-			if(check_ts_section(&(dec->ecm_next))){
-				if( (!check_ts_section_crc(&(dec->ecm_next))) ||
-				    (dec->ecm_next.hdr.current_next_indicator == 0) ||
-				    (compare_ts_section(&(dec->ecm_curr), &(dec->ecm_next)) == 0) ){
-					reset_ts_section(&(dec->ecm_next));
-					goto NEXT;
-				}
-				swap_ts_section(&(dec->ecm_curr), &(dec->ecm_next));
-				reset_ts_section(&(dec->ecm_next));
-				r = proc_ecm(dec, prv->bcas);
-				if(r < 0){
-					goto LAST;
-				}
+			m = dec->ecm->put(dec->ecm, &hdr, p, n);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_ECM_PARSE_FAILURE;
+				goto LAST;
+			}
+			m = dec->ecm->get_count(dec->ecm);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_ECM_PARSE_FAILURE;
+				goto LAST;
+			}
+			if(m == 0){
+				goto NEXT;
+			}
+			r = proc_ecm(dec, prv->bcas, prv->multi2_round);
+			if(r < 0){
+				goto LAST;
 			}
 		}else if(prv->map[pid].type == PID_MAP_TYPE_PMT){
 			pgrm = (TS_PROGRAM *)(prv->map[pid].target);
-			r = set_ts_section_data(&(pgrm->pmt_next), &hdr, p, n);
+			if( (pgrm == NULL) || (pgrm->pmt == NULL) ){
+				/* this code will never execute */
+				r = ARIB_STD_B25_ERROR_PMT_PARSE_FAILURE;
+				goto LAST;
+			}
+			m = pgrm->pmt->put(pgrm->pmt, &hdr, p, n);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_PMT_PARSE_FAILURE;
+				goto LAST;
+			}
+			m = pgrm->pmt->get_count(pgrm->pmt);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_PMT_PARSE_FAILURE;
+				goto LAST;
+			}
+			if(m == 0){
+				goto NEXT;
+			}
+			r = proc_pmt(prv, pgrm);
 			if(r < 0){
 				goto LAST;
 			}
-			if(check_ts_section(&(pgrm->pmt_next))){
-				if( (!check_ts_section_crc(&(pgrm->pmt_next))) ||
-				    (pgrm->pmt_next.hdr.current_next_indicator == 0) ||
-				    (compare_ts_section(&(pgrm->pmt_curr), &(pgrm->pmt_next)) == 0) ){
-					reset_ts_section(&(pgrm->pmt_next));
-					goto NEXT;
-				}
-				swap_ts_section(&(pgrm->pmt_curr), &(pgrm->pmt_next));
-				reset_ts_section(&(pgrm->pmt_next));
-				r = proc_pmt(prv, pgrm);
-				if(r < 0){
+		}else if(prv->map[pid].type == PID_MAP_TYPE_EMM){
+			if( prv->emm == NULL ){
+				prv->emm = create_ts_section_parser();
+				if(prv->emm == NULL){
+					r = ARIB_STD_B25_ERROR_EMM_PARSE_FAILURE;
 					goto LAST;
 				}
-				if(!check_ecm_complete(prv)){
-					curr += unit;
+			}
+			m = prv->emm->put(prv->emm, &hdr, p, n);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_EMM_PARSE_FAILURE;
+				goto LAST;
+			}
+			m = prv->emm->get_count(prv->emm);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_EMM_PARSE_FAILURE;
+				goto LAST;
+			}
+			if(m == 0){
+				goto NEXT;
+			}
+			r = proc_emm(prv);
+			if(r < 0){
+				goto LAST;
+			}
+		}else if(pid == 0x0001){
+			if( prv->cat == NULL ){
+				prv->cat = create_ts_section_parser();
+				if(prv->cat == NULL){
+					r = ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
 					goto LAST;
 				}
+			}
+			m = prv->cat->put(prv->cat, &hdr, p, n);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_CAT_PARSE_FAILURE;
+				goto LAST;
+			}
+			m = prv->cat->get_count(prv->cat);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_CAT_PARSE_FAILURE;
+				goto LAST;
+			}
+			if(m == 0){
+				goto NEXT;
+			}
+			r = proc_cat(prv);
+			if(r < 0){
+				goto LAST;
 			}
 		}else if(pid == 0x0000){
-			r = set_ts_section_data(&(prv->pat_next), &hdr, p, n);
-			if(r < 0){
-				goto LAST;
-			}
-			if(check_ts_section(&(prv->pat_next))){
-				if( (!check_ts_section_crc(&(prv->pat_next))) ||
-				    (prv->pat_next.hdr.current_next_indicator == 0) ||
-				    (compare_ts_section(&(prv->pat_curr), &(prv->pat_next)) == 0)){
-					reset_ts_section(&(prv->pat_next));
-					goto NEXT;
-				}
-				swap_ts_section(&(prv->pat_curr), &(prv->pat_next));
-				reset_ts_section(&(prv->pat_next));
-				r = proc_pat(prv);
-				if(r < 0){
+			if( prv->pat == NULL ){
+				prv->pat = create_ts_section_parser();
+				if(prv->pat == NULL){
+					r = ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
 					goto LAST;
 				}
-				curr += unit;
+			}
+			m = prv->pat->put(prv->pat, &hdr, p, n);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_PAT_PARSE_FAILURE;
+				goto LAST;
+			}
+			m = prv->pat->get_count(prv->pat);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_PAT_PARSE_FAILURE;
+				goto LAST;
+			}
+			if(m == 0){
+				goto NEXT;
+			}
+			r = proc_pat(prv);
+			if(r < 0){
 				goto LAST;
 			}
 		}
-
+			
 	NEXT:
 		curr += unit;
 	}
@@ -880,8 +925,14 @@ static void teardown(ARIB_STD_B25_PRIVATE_DATA *prv)
 	prv->unit_size = 0;
 	prv->sbuf_offset = 0;
 
-	release_ts_section(&(prv->pat_curr));
-	release_ts_section(&(prv->pat_next));
+	if(prv->pat != NULL){
+		prv->pat->release(prv->pat);
+		prv->pat = NULL;
+	}
+	if(prv->cat != NULL){
+		prv->cat->release(prv->cat);
+		prv->cat = NULL;
+	}
 
 	if(prv->program != NULL){
 		for(i=0;i<prv->p_count;i++){
@@ -899,6 +950,12 @@ static void teardown(ARIB_STD_B25_PRIVATE_DATA *prv)
 	}
 
 	memset(prv->map, 0, sizeof(prv->map));
+
+	prv->emm_pid = 0;
+	if(prv->emm != NULL){
+		prv->emm->release(prv->emm);
+		prv->emm = NULL;
+	}
 
 	release_work_buffer(&(prv->sbuf));
 	release_work_buffer(&(prv->dbuf));
@@ -979,7 +1036,7 @@ static int select_unit_size(ARIB_STD_B25_PRIVATE_DATA *prv)
 static int find_pat(ARIB_STD_B25_PRIVATE_DATA *prv)
 {
 	int r;
-	int n;
+	int n,size;
 	
 	int32_t unit;
 
@@ -994,8 +1051,8 @@ static int find_pat(ARIB_STD_B25_PRIVATE_DATA *prv)
 	curr = prv->sbuf.head + prv->sbuf_offset;
 	tail = prv->sbuf.tail;
 
-	while( (curr+unit) <= tail ){
-		if(curr[0] != 0x47){
+	while( (curr+unit) < tail ){
+		if( (curr[0] != 0x47) || (curr[unit] != 0x47) ){
 			p = resync(curr, tail, unit);
 			if(p == NULL){
 				goto LAST;
@@ -1004,35 +1061,48 @@ static int find_pat(ARIB_STD_B25_PRIVATE_DATA *prv)
 		}
 		extract_ts_header(&hdr, curr);
 		if(hdr.pid == 0x0000){
+			
 			p = curr+4;
 			if(hdr.adaptation_field_control & 0x02){
 				p += (p[0]+1);
 			}
-			n = 188 - (p-curr);
-			r = set_ts_section_data(&(prv->pat_next), &hdr, p, n);
-			if(r < 0){
+			size = 188 - (p-curr);
+			if(size < 1){
+				goto NEXT;
+			}
+			
+			if(prv->pat == NULL){
+				prv->pat = create_ts_section_parser();
+				if(prv->pat == NULL){
+					return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+				}
+			}
+			
+			n = prv->pat->put(prv->pat, &hdr, p, size);
+			if(n < 0){
+				r = ARIB_STD_B25_ERROR_PAT_PARSE_FAILURE;
+				curr += unit;
 				goto LAST;
 			}
-			if(check_ts_section(&(prv->pat_next))){
-				if( (!check_ts_section_crc(&(prv->pat_next))) ||
-				    (prv->pat_next.hdr.current_next_indicator == 0) ){
-					reset_ts_section(&(prv->pat_next));
-					curr += unit;
-					continue;
-				}
-				swap_ts_section(&(prv->pat_curr), &(prv->pat_next));
-				reset_ts_section(&(prv->pat_next));
+			n = prv->pat->get_count(prv->pat);
+			if(n < 0){
+				r = ARIB_STD_B25_ERROR_PAT_PARSE_FAILURE;
+				curr += unit;
+				goto LAST;
+			}
+			if(n > 0){
 				curr += unit;
 				goto LAST;
 			}
 		}
+	NEXT:
 		curr += unit;
 	}
 
 LAST:
 	prv->sbuf_offset = curr - prv->sbuf.head;
 
-	if(check_ts_section(&(prv->pat_curr))){
+	if( (prv->pat != NULL) && (prv->pat->get_count(prv->pat) > 0) ){
 		r = proc_pat(prv);
 	}
 
@@ -1041,8 +1111,8 @@ LAST:
 
 static int proc_pat(ARIB_STD_B25_PRIVATE_DATA *prv)
 {
-	int i;
-	int offset;
+	int r;
+	int i,n;
 	int len;
 	int count;
 	
@@ -1053,14 +1123,29 @@ static int proc_pat(ARIB_STD_B25_PRIVATE_DATA *prv)
 	uint8_t *tail;
 	
 	TS_PROGRAM *work;
+	TS_SECTION  sect;
 
-	offset = 8;
-	len = prv->pat_curr.hdr.section_length - (5+4);
+	r = 0;
+	memset(&sect, 0, sizeof(sect));
+
+	n = prv->pat->get(prv->pat, &sect);
+	if(n < 0){
+		r = ARIB_STD_B25_ERROR_PAT_PARSE_FAILURE;
+		goto LAST;
+	}
+
+	if(sect.hdr.table_id != TS_SECTION_ID_PROGRAM_ASSOCIATION){
+		r = ARIB_STD_B25_WARN_TS_SECTION_ID_MISSMATCH;
+		goto LAST;
+	}
+
+	len = (sect.tail - sect.data) - 4;
 
 	count = len / 4;
 	work = (TS_PROGRAM *)calloc(count, sizeof(TS_PROGRAM));
 	if(work == NULL){
-		return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+		r = ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+		goto LAST;
 	}
 	
 	if(prv->program != NULL){
@@ -1073,16 +1158,21 @@ static int proc_pat(ARIB_STD_B25_PRIVATE_DATA *prv)
 	prv->p_count = 0;
 	memset(&(prv->map), 0, sizeof(prv->map));
 
-	head = prv->pat_curr.buf.head + offset;
-	tail = head + len;
+	head = sect.data;
+	tail = sect.tail-4;
 
 	i = 0;
-	while( (head+3) < tail ){
+	while( (head+4) <= tail ){
 		program_number = ((head[0] << 8) | head[1]);
 		pid = ((head[2] << 8) | head[3]) & 0x1fff;
 		if(program_number != 0){
 			work[i].program_number = program_number;
 			work[i].pmt_pid = pid;
+			work[i].pmt = create_ts_section_parser();
+			if(work[i].pmt == NULL){
+				r = ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+				break;
+			}
 			prv->map[pid].type = PID_MAP_TYPE_PMT;
 			prv->map[pid].target = work+i;
 			i += 1;
@@ -1093,11 +1183,19 @@ static int proc_pat(ARIB_STD_B25_PRIVATE_DATA *prv)
 	prv->program = work;
 	prv->p_count = i;
 	
-	prv->map[0].ref = 1;
-	prv->map[0].type = PID_MAP_TYPE_PAT;
-	prv->map[0].target = NULL;
+	prv->map[0x0000].ref = 1;
+	prv->map[0x0000].type = PID_MAP_TYPE_PAT;
+	prv->map[0x0000].target = NULL;
 
-	return 0;
+LAST:
+	if(sect.raw != NULL){
+		n = prv->pat->ret(prv->pat, &sect);
+		if( (n < 0) && (r == 0) ){
+			r = ARIB_STD_B25_ERROR_PAT_PARSE_FAILURE;
+		}
+	}
+
+	return r;
 }
 
 static int check_pmt_complete(ARIB_STD_B25_PRIVATE_DATA *prv)
@@ -1131,7 +1229,7 @@ static int check_pmt_complete(ARIB_STD_B25_PRIVATE_DATA *prv)
 static int find_pmt(ARIB_STD_B25_PRIVATE_DATA *prv)
 {
 	int r;
-	int n;
+	int n,size;
 	
 	int32_t unit;
 
@@ -1147,9 +1245,9 @@ static int find_pmt(ARIB_STD_B25_PRIVATE_DATA *prv)
 	curr = prv->sbuf.head + prv->sbuf_offset;
 	tail = prv->sbuf.tail;
 
-	while( (curr+unit) <= tail ){
+	while( (curr+unit) < tail ){
 		
-		if(curr[0] != 0x47){
+		if( (curr[0] != 0x47) || (curr[unit] != 0x47) ){
 			p = resync(curr, tail, unit);
 			if(p == NULL){
 				goto LAST;
@@ -1168,38 +1266,58 @@ static int find_pmt(ARIB_STD_B25_PRIVATE_DATA *prv)
 		}
 		
 		if(pgrm->phase == 0){
+			
 			p = curr + 4;
 			if(hdr.adaptation_field_control & 0x02){
 				p += (p[0]+1);
 			}
-			n = 188 - (p-curr);
-			r = set_ts_section_data(&(pgrm->pmt_next), &hdr, p, n);
-			if(r < 0){
+			size = 188 - (p-curr);
+			if(size < 1){
+				goto NEXT;
+			}
+			
+			if(pgrm->pmt == NULL){
+				/* this code will never execute */
+				r = ARIB_STD_B25_ERROR_PMT_PARSE_FAILURE;
+				curr += unit;
 				goto LAST;
 			}
-			if(check_ts_section(&(pgrm->pmt_next))){
-				if( (!check_ts_section_crc(&(pgrm->pmt_next))) ||
-				    (pgrm->pmt_next.hdr.current_next_indicator == 0) ){
-					reset_ts_section(&(pgrm->pmt_next));
-					curr += unit;
-					continue;
-				}
-				swap_ts_section(&(pgrm->pmt_curr), &(pgrm->pmt_next));
-				reset_ts_section(&(pgrm->pmt_next));
-				r = proc_pmt(prv, pgrm);
-				if(r < 0){
-					goto LAST;
-				}
-				pgrm->phase = 1;
-				if(check_pmt_complete(prv)){
-					curr += unit;
-					goto LAST;
-				}
+			
+			n = pgrm->pmt->put(pgrm->pmt, &hdr, p, size);
+			if(n < 0){
+				r = ARIB_STD_B25_ERROR_PMT_PARSE_FAILURE;
+				curr += unit;
+				goto LAST;
+			}
+			n = pgrm->pmt->get_count(pgrm->pmt);
+			if(n < 0){
+				r =ARIB_STD_B25_ERROR_PMT_PARSE_FAILURE;
+				curr += unit;
+				goto LAST;
+			}
+			if(n == 0){
+				goto NEXT;
+			}
+			r = proc_pmt(prv, pgrm);
+			if(r < 0){
+				curr += unit;
+				goto LAST;
+			}
+			if(r > 0){
+				/* broken or unexpected section data */
+				goto NEXT;
+			}
+			pgrm->phase = 1;
+			if(check_pmt_complete(prv)){
+				curr += unit;
+				goto LAST;
 			}
 		}else{
 			pgrm->phase = 2;
+			curr += unit;
 			goto LAST;
 		}
+		
 	NEXT:
 		curr += unit;
 	}
@@ -1214,7 +1332,7 @@ static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 {
 	int r;
 
-	int offset;
+	int n;
 	int length;
 
 	uint8_t *head;
@@ -1224,6 +1342,8 @@ static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 	int32_t pid;
 	int32_t type;
 
+	TS_SECTION sect;
+	
 	DECRYPTOR_ELEM *dec[2];
 	DECRYPTOR_ELEM *dw;
 	
@@ -1231,19 +1351,27 @@ static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 
 	r = 0;
 	dec[0] = NULL;
-	
-	offset = 8;
-	length = pgrm->pmt_curr.hdr.section_length - (5+4);
+	memset(&sect, 0, sizeof(sect));
 
-	head = pgrm->pmt_curr.buf.head + offset;
-	tail = head + length;
+	n = pgrm->pmt->get(pgrm->pmt, &sect);
+	if(n < 0){
+		r = ARIB_STD_B25_ERROR_PMT_PARSE_FAILURE;
+		goto LAST;
+	}
+	if(sect.hdr.table_id != TS_SECTION_ID_PROGRAM_MAP){
+		r = ARIB_STD_B25_WARN_TS_SECTION_ID_MISSMATCH;
+		goto LAST;
+	}
+	
+	head = sect.data;
+	tail = sect.tail-4;
 
 	pgrm->pcr_pid = ((head[0] << 8) | head[1]) & 0x1fff;
 	length = ((head[2] << 8) | head[3]) & 0x0fff;
 	head += 4;
 	if(head+length > tail){
-		/* broken PMT - ignore */
-		return 0;
+		r = ARIB_STD_B25_WARN_BROKEN_TS_SECTION;
+		goto LAST;
 	}
 
 	/* find major ecm_pid and regist decryptor */
@@ -1251,7 +1379,8 @@ static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 	if( (ecm_pid != 0) && (ecm_pid != 0x1fff) ){
 		dec[0] = set_decryptor(prv, ecm_pid);
 		if(dec[0] == NULL){
-			return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+			r = ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+			goto LAST;
 		}
 		dec[0]->ref += 1;
 	}
@@ -1271,7 +1400,8 @@ static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 	/* add current stream entries */
 	if( (ecm_pid != 0) && (ecm_pid != 0x1fff) ){
 		if(!add_ecm_stream(prv, &(pgrm->streams), ecm_pid)){
-			return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+			r = ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+			goto LAST;
 		}
 	}
 
@@ -1287,10 +1417,12 @@ static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 		if( (ecm_pid != 0) && (ecm_pid != 0x1fff) ){
 			dec[1] = set_decryptor(prv, ecm_pid);
 			if(dec[1] == NULL){
-				return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+				r = ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+				goto LAST;
 			}
 			if(!add_ecm_stream(prv, &(pgrm->streams), ecm_pid)){
-				return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+				r = ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+				goto LAST;
 			}
 		}else{
 			dec[1] = NULL;
@@ -1300,7 +1432,8 @@ static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 		if( strm == NULL ){
 			strm = create_stream_elem(pid, type);
 			if(strm == NULL){
-				return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+				r = ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+				goto LAST;
 			}
 		}else{
 			strm->pid = pid;
@@ -1315,12 +1448,20 @@ static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 		
 		put_stream_list_tail(&(pgrm->streams), strm);
 	}
-
+	
+LAST:
 	if( dec[0] != NULL ){
 		dec[0]->ref -= 1;
 		if( dec[0]->ref < 1 ){
 			remove_decryptor(prv, dec[0]);
 			dec[0] = NULL;
+		}
+	}
+
+	if(sect.raw != NULL){
+		n = pgrm->pmt->ret(pgrm->pmt, &sect);
+		if( (n < 0) && (r == 0) ){
+			return ARIB_STD_B25_ERROR_PMT_PARSE_FAILURE;
 		}
 	}
 
@@ -1381,16 +1522,29 @@ static int add_ecm_stream(ARIB_STD_B25_PRIVATE_DATA *prv, TS_STREAM_LIST *list, 
 
 static int check_ecm_complete(ARIB_STD_B25_PRIVATE_DATA *prv)
 {
+	int n,num[3];
 	DECRYPTOR_ELEM *e;
+
+	memset(num, 0, sizeof(num));
 
 	e = prv->decrypt.head;
 	while( e != NULL ){
-		if( (e->ref > 0) &&
-		    !check_ts_section(&(e->ecm_curr)) ){
-			/* ECM is not received */
-			return 0;
+		n = e->phase;
+		if(n < 0){
+			n = 0;
+		}else if(n > 2){
+			n = 2;
 		}
+		num[n] += 1;
 		e = (DECRYPTOR_ELEM *)(e->next);
+	}
+
+	if(num[2] > 0){
+		return 1;
+	}
+
+	if(num[0] > 0){
+		return 0;
 	}
 
 	return 1;
@@ -1399,7 +1553,7 @@ static int check_ecm_complete(ARIB_STD_B25_PRIVATE_DATA *prv)
 static int find_ecm(ARIB_STD_B25_PRIVATE_DATA *prv)
 {
 	int r;
-	int n;
+	int n,size;
 
 	int32_t unit;
 
@@ -1415,8 +1569,8 @@ static int find_ecm(ARIB_STD_B25_PRIVATE_DATA *prv)
 	curr = prv->sbuf.head + prv->sbuf_offset;
 	tail = prv->sbuf.tail;
 
-	while( (curr+unit) <= tail ){
-		if(curr[0] != 0x47){
+	while( (curr+unit) < tail ){
+		if( (curr[0] != 0x47) || (curr[unit] != 0x47) ){
 			p = resync(curr, tail, unit);
 			if(p == NULL){
 				goto LAST;
@@ -1433,39 +1587,59 @@ static int find_ecm(ARIB_STD_B25_PRIVATE_DATA *prv)
 		}
 
 		if(dec->phase == 0){
+			
 			p = curr + 4;
 			if(hdr.adaptation_field_control & 0x02){
 				p += (p[0]+1);
 			}
-			n = 188 - (p-curr);
-			r = set_ts_section_data(&(dec->ecm_next), &hdr, p, n);
-			if(r < 0){
+			size = 188 - (p-curr);
+			if(size < 1){
+				goto NEXT;
+			}
+			
+			if(dec->ecm == NULL){
+				/*  this code will never execute */
+				r = ARIB_STD_B25_ERROR_ECM_PARSE_FAILURE;
+				curr += unit;
 				goto LAST;
 			}
-			if(check_ts_section(&(dec->ecm_next))){
-				if( (!check_ts_section_crc(&(dec->ecm_next))) ||
-				    (dec->ecm_next.hdr.current_next_indicator == 0) ){ 
-					reset_ts_section(&(dec->ecm_next));
-					curr += unit;
-					continue;
-				}
-				swap_ts_section(&(dec->ecm_curr), &(dec->ecm_next));
-				reset_ts_section(&(dec->ecm_next));
-				r = proc_ecm(dec, prv->bcas);
-				if(r < 0){
-					goto LAST;
-				}
-				if(dec->m2 != NULL){
-					dec->m2->set_round(dec->m2, prv->multi2_round);
-				}
-				dec->phase = 1;
-				if(check_ecm_complete(prv)){
-					curr += unit;
-					goto LAST;
-				}
+				
+			n = dec->ecm->put(dec->ecm, &hdr, p, size);
+			if(n < 0){
+				r = ARIB_STD_B25_ERROR_ECM_PARSE_FAILURE;
+				curr += unit;
+				goto LAST;
 			}
+			n = dec->ecm->get_count(dec->ecm);
+			if(n < 0){
+				r = ARIB_STD_B25_ERROR_ECM_PARSE_FAILURE;
+				curr += unit;
+				goto LAST;
+			}
+			if(n == 0){
+				goto NEXT;
+			}
+
+			r = proc_ecm(dec, prv->bcas, prv->multi2_round);
+			if(r < 0){
+				curr += unit;
+				goto LAST;
+			}
+			if( (r > 0) && (r != ARIB_STD_B25_WARN_UNPURCHASED_ECM) ){
+				/* broken or unexpected section data */
+				goto NEXT;
+			}
+			
+			dec->phase = 1;
+			if(check_ecm_complete(prv)){
+				curr += unit;
+				goto LAST;
+			}
+
 		}else{
 			dec->phase = 2;
+			curr += unit;
+			goto LAST;
 		}
 		
 	NEXT:
@@ -1478,10 +1652,9 @@ LAST:
 	return r;
 }
 
-static int proc_ecm(DECRYPTOR_ELEM *dec, B_CAS_CARD *bcas)
+static int proc_ecm(DECRYPTOR_ELEM *dec, B_CAS_CARD *bcas, int32_t multi2_round)
 {
-	int r;
-	int offset;
+	int r,n;
 	int length;
 
 	uint8_t *p;
@@ -1489,22 +1662,44 @@ static int proc_ecm(DECRYPTOR_ELEM *dec, B_CAS_CARD *bcas)
 	B_CAS_INIT_STATUS is;
 	B_CAS_ECM_RESULT res;
 
-	if(bcas == NULL){
-		return ARIB_STD_B25_ERROR_EMPTY_B_CAS_CARD;
-	}
+	TS_SECTION sect;
 
 	r = 0;
+	memset(&sect, 0, sizeof(sect));
 	
-	offset = 8;
-	length = dec->ecm_curr.hdr.section_length - (5+4);
-	p = dec->ecm_curr.buf.head + offset;
+	if(bcas == NULL){
+		r = ARIB_STD_B25_ERROR_EMPTY_B_CAS_CARD;
+		goto LAST;
+	}
+
+	n = dec->ecm->get(dec->ecm, &sect);
+	if(n < 0){
+		r = ARIB_STD_B25_ERROR_ECM_PARSE_FAILURE;
+		goto LAST;
+	}
+	if(sect.hdr.table_id != TS_SECTION_ID_ECM_S){
+		r = ARIB_STD_B25_WARN_TS_SECTION_ID_MISSMATCH;
+		goto LAST;
+	}
+	
+	if(dec->locked){
+		/* previous ECM has returned unpurchased
+		   skip this pid for B-CAS card load reduction */
+		dec->unpurchased += 1;
+		r = ARIB_STD_B25_WARN_UNPURCHASED_ECM;
+		goto LAST;
+	}
+
+	length = (sect.tail - sect.data) - 4;
+	p = sect.data;
 
 	r = bcas->proc_ecm(bcas, &res, p, length);
 	if(r < 0){
 		if(dec->m2 != NULL){
 			dec->m2->clear_scramble_key(dec->m2);
 		}
-		return ARIB_STD_B25_ERROR_ECM_PROC_FAILURE;
+		r = ARIB_STD_B25_ERROR_ECM_PROC_FAILURE;
+		goto LAST;
 	}
 	
 	if( (res.return_code != 0x0800) &&
@@ -1517,7 +1712,9 @@ static int proc_ecm(DECRYPTOR_ELEM *dec, B_CAS_CARD *bcas)
 		}
 		dec->unpurchased += 1;
 		dec->last_error = res.return_code;
-		return ARIB_STD_B25_WARN_UNPURCHASED_ECM;
+		dec->locked += 1;
+		r = ARIB_STD_B25_WARN_UNPURCHASED_ECM;
+		goto LAST;
 	}
 
 	if(dec->m2 == NULL){
@@ -1531,10 +1728,19 @@ static int proc_ecm(DECRYPTOR_ELEM *dec, B_CAS_CARD *bcas)
 		}
 		dec->m2->set_system_key(dec->m2, is.system_key);
 		dec->m2->set_init_cbc(dec->m2, is.init_cbc);
+		dec->m2->set_round(dec->m2, multi2_round);
 	}
 
 	dec->m2->set_scramble_key(dec->m2, res.scramble_key);
 
+LAST:
+	if(sect.raw != NULL){
+		n = dec->ecm->ret(dec->ecm, &sect);
+		if( (n < 0) && (r == 0) ){
+			r = ARIB_STD_B25_ERROR_ECM_PARSE_FAILURE;
+		}
+	}
+	
 	return r;
 }
 
@@ -1628,71 +1834,129 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 
 		if(prv->map[pid].type == PID_MAP_TYPE_ECM){
 			dec = (DECRYPTOR_ELEM *)(prv->map[pid].target);
-			r = set_ts_section_data(&(dec->ecm_next), &hdr, p, n);
-			if(r < 0){
+			if( (dec == NULL) || (dec->ecm == NULL) ){
+				/* this code will never execute */
+				r = ARIB_STD_B25_ERROR_ECM_PARSE_FAILURE;
 				goto LAST;
 			}
-			if(check_ts_section(&(dec->ecm_next))){
-				if( (!check_ts_section_crc(&(dec->ecm_next))) ||
-				    (dec->ecm_next.hdr.current_next_indicator == 0) ||
-				    (compare_ts_section(&(dec->ecm_curr), &(dec->ecm_next)) == 0) ){
-					reset_ts_section(&(dec->ecm_next));
-					goto NEXT;
-				}
-				swap_ts_section(&(dec->ecm_curr), &(dec->ecm_next));
-				reset_ts_section(&(dec->ecm_next));
-				r = proc_ecm(dec, prv->bcas);
-				if(r < 0){
-					goto LAST;
-				}
+			m = dec->ecm->put(dec->ecm, &hdr, p, n);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_ECM_PARSE_FAILURE;
+				goto LAST;
+			}
+			m = dec->ecm->get_count(dec->ecm);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_ECM_PARSE_FAILURE;
+				goto LAST;
+			}
+			if(m == 0){
+				goto NEXT;
+			}
+			r = proc_ecm(dec, prv->bcas, prv->multi2_round);
+			if(r < 0){
+				goto LAST;
 			}
 		}else if(prv->map[pid].type == PID_MAP_TYPE_PMT){
 			pgrm = (TS_PROGRAM *)(prv->map[pid].target);
-			r = set_ts_section_data(&(pgrm->pmt_next), &hdr, p, n);
+			if( (pgrm == NULL) || (pgrm->pmt == NULL) ){
+				/* this code will never execute */
+				r = ARIB_STD_B25_ERROR_PMT_PARSE_FAILURE;
+				goto LAST;
+			}
+			m = pgrm->pmt->put(pgrm->pmt, &hdr, p, n);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_PMT_PARSE_FAILURE;
+				goto LAST;
+			}
+			m = pgrm->pmt->get_count(pgrm->pmt);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_PMT_PARSE_FAILURE;
+				goto LAST;
+			}
+			if(m == 0){
+				goto NEXT;
+			}
+			r = proc_pmt(prv, pgrm);
 			if(r < 0){
 				goto LAST;
 			}
-			if(check_ts_section(&(pgrm->pmt_next))){
-				if( (!check_ts_section_crc(&(pgrm->pmt_next))) ||
-				    (pgrm->pmt_next.hdr.current_next_indicator == 0) ||
-				    (compare_ts_section(&(pgrm->pmt_curr), &(pgrm->pmt_next)) == 0) ){
-					reset_ts_section(&(pgrm->pmt_next));
-					goto NEXT;
-				}
-				swap_ts_section(&(pgrm->pmt_curr), &(pgrm->pmt_next));
-				reset_ts_section(&(pgrm->pmt_next));
-				r = proc_pmt(prv, pgrm);
-				if(r < 0){
+		}else if(prv->map[pid].type == PID_MAP_TYPE_EMM){
+			if( prv->emm == NULL ){
+				prv->emm = create_ts_section_parser();
+				if(prv->emm == NULL){
+					r = ARIB_STD_B25_ERROR_EMM_PARSE_FAILURE;
 					goto LAST;
 				}
-				if(!check_ecm_complete(prv)){
-					curr += unit;
+			}
+			m = prv->emm->put(prv->emm, &hdr, p, n);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_EMM_PARSE_FAILURE;
+				goto LAST;
+			}
+			m = prv->emm->get_count(prv->emm);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_EMM_PARSE_FAILURE;
+				goto LAST;
+			}
+			if(m == 0){
+				goto NEXT;
+			}
+			r = proc_emm(prv);
+			if(r < 0){
+				goto LAST;
+			}
+		}else if(pid == 0x0001){
+			if( prv->cat == NULL ){
+				prv->cat = create_ts_section_parser();
+				if(prv->cat == NULL){
+					r = ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
 					goto LAST;
 				}
+			}
+			m = prv->cat->put(prv->cat, &hdr, p, n);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_CAT_PARSE_FAILURE;
+				goto LAST;
+			}
+			m = prv->cat->get_count(prv->cat);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_CAT_PARSE_FAILURE;
+				goto LAST;
+			}
+			if(m == 0){
+				goto NEXT;
+			}
+			r = proc_cat(prv);
+			if(r < 0){
+				goto LAST;
 			}
 		}else if(pid == 0x0000){
-			r = set_ts_section_data(&(prv->pat_next), &hdr, p, n);
-			if(r < 0){
-				goto LAST;
-			}
-			if(check_ts_section(&(prv->pat_next))){
-				if( (!check_ts_section_crc(&(prv->pat_next))) ||
-				    (prv->pat_next.hdr.current_next_indicator == 0) ||
-				    (compare_ts_section(&(prv->pat_curr), &(prv->pat_next)) == 0)){
-					reset_ts_section(&(prv->pat_next));
-					goto NEXT;
-				}
-				swap_ts_section(&(prv->pat_curr), &(prv->pat_next));
-				reset_ts_section(&(prv->pat_next));
-				r = proc_pat(prv);
-				if(r < 0){
+			if( prv->pat == NULL ){
+				prv->pat = create_ts_section_parser();
+				if(prv->pat == NULL){
+					r = ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
 					goto LAST;
 				}
-				curr += unit;
+			}
+			m = prv->pat->put(prv->pat, &hdr, p, n);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_PAT_PARSE_FAILURE;
+				goto LAST;
+			}
+			m = prv->pat->get_count(prv->pat);
+			if(m < 0){
+				r = ARIB_STD_B25_ERROR_PAT_PARSE_FAILURE;
+				goto LAST;
+			}
+			if(m == 0){
+				goto NEXT;
+			}
+			r = proc_pat(prv);
+			if(r < 0){
 				goto LAST;
 			}
 		}
-
+			
 	NEXT:
 		curr += unit;
 	}
@@ -1712,6 +1976,147 @@ LAST:
 	return r;
 }
 
+static int proc_cat(ARIB_STD_B25_PRIVATE_DATA *prv)
+{
+	int r;
+	int n;
+	int emm_pid;
+
+	TS_SECTION sect;
+
+	r = 0;
+	memset(&sect, 0, sizeof(sect));
+
+	n = prv->cat->get(prv->cat, &sect);
+	if(n < 0){
+		r = ARIB_STD_B25_ERROR_CAT_PARSE_FAILURE;
+		goto LAST;
+	}
+
+	if(sect.hdr.table_id != TS_SECTION_ID_CONDITIONAL_ACCESS){
+		r = ARIB_STD_B25_WARN_TS_SECTION_ID_MISSMATCH;
+		goto LAST;
+	}
+
+	emm_pid = find_ca_descriptor_pid(sect.data, sect.tail-4);
+	if( (emm_pid != 0x0000) && (emm_pid != 0x1fff) ){
+		if( (prv->map[emm_pid].target != NULL) &&
+		    (prv->map[emm_pid].type == PID_MAP_TYPE_OTHER) ){
+			DECRYPTOR_ELEM *dec;
+			dec = (DECRYPTOR_ELEM *)(prv->map[emm_pid].target);
+			dec->ref -= 1;
+			if(dec->ref < 1){
+				remove_decryptor(prv, dec);
+			}
+		}
+		prv->emm_pid = emm_pid;
+		prv->map[emm_pid].ref = 1;
+		prv->map[emm_pid].type = PID_MAP_TYPE_EMM;
+		prv->map[emm_pid].target = NULL;
+	}
+	
+	prv->map[0x0001].ref = 1;
+	prv->map[0x0001].type = PID_MAP_TYPE_CAT;
+	prv->map[0x0001].target = NULL;
+
+LAST:
+
+	if(sect.raw != NULL){
+		n = prv->cat->ret(prv->cat, &sect);
+		if( (n < 0) && (r == 0) ){
+			r = ARIB_STD_B25_ERROR_CAT_PARSE_FAILURE;
+		}
+	}
+
+	return r;
+}
+
+static int proc_emm(ARIB_STD_B25_PRIVATE_DATA *prv)
+{
+	int r;
+	int i,j,n;
+
+	int len;
+
+	uint8_t *head;
+	uint8_t *tail;
+
+	TS_SECTION sect;
+	EMM_FIXED_PART emm_hdr;
+
+	r = 0;
+	memset(&sect, 0, sizeof(sect));
+
+	if(prv->bcas == NULL){
+		r = ARIB_STD_B25_ERROR_EMPTY_B_CAS_CARD;
+		goto LAST;
+	}
+
+	while( (n = prv->emm->get_count(prv->emm)) > 0 ){
+
+		n = prv->emm->get(prv->emm, &sect);
+		if(n < 0){
+			r = ARIB_STD_B25_ERROR_CAT_PARSE_FAILURE;
+			goto LAST;
+		}
+
+		if(sect.hdr.table_id == TS_SECTION_ID_EMM_MESSAGE){
+			/* EMM_MESSAGE is not supported */
+			goto NEXT;
+		}else if(sect.hdr.table_id != TS_SECTION_ID_EMM_S){
+			r = ARIB_STD_B25_WARN_TS_SECTION_ID_MISSMATCH;
+			goto LAST;
+		}
+
+		head = sect.data;
+		tail = sect.tail - 4;
+
+		i = 0;
+		while( (head+13) <= tail ){
+			
+			extract_emm_fixed_part(&emm_hdr, head);
+			len = emm_hdr.associated_information_length+7;
+			if( (head+len) > tail ){
+				/* broken EMM element */
+				goto NEXT;
+			}
+			
+			for(j=0;j<prv->casid.count;j++){
+				if(prv->casid.data[j] == emm_hdr.card_id){
+					n = prv->bcas->proc_emm(prv->bcas, head, len);
+					if(n < 0){
+						r = ARIB_STD_B25_ERROR_EMM_PROC_FAILURE;
+						goto LAST;
+					}
+					unlock_all_decryptor(prv);
+				}
+			}
+
+			head += len;
+		}
+
+	NEXT:
+		if(sect.raw != NULL){
+			n = prv->emm->ret(prv->emm, &sect);
+			if( (n < 0) && (r == 0) ){
+				r = ARIB_STD_B25_ERROR_EMM_PARSE_FAILURE;
+				goto LAST;
+			}
+			memset(&sect, 0, sizeof(sect));
+		}
+	}
+
+LAST:
+	if(sect.raw != NULL){
+		n = prv->emm->ret(prv->emm, &sect);
+		if( (n < 0) && (r == 0) ){
+			r = ARIB_STD_B25_ERROR_EMM_PARSE_FAILURE;
+		}
+	}
+
+	return r;
+}
+
 static void release_program(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 {
 	int32_t pid;
@@ -1719,8 +2124,10 @@ static void release_program(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 
 	pid = pgrm->pmt_pid;
 	
-	release_ts_section(&(pgrm->pmt_curr));
-	release_ts_section(&(pgrm->pmt_next));
+	if(pgrm->pmt != NULL){
+		pgrm->pmt->release(pgrm->pmt);
+		pgrm->pmt = NULL;
+	}
 
 	while( (strm = get_stream_list_head(&(pgrm->old_strm))) != NULL ){
 		unref_stream(prv, strm->pid);
@@ -1775,6 +2182,11 @@ static DECRYPTOR_ELEM *set_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, int32_t pid
 		return NULL;
 	}
 	r->ecm_pid = pid;
+	r->ecm = create_ts_section_parser();
+	if(r->ecm == NULL){
+		free(r);
+		return NULL;
+	}
 
 	if(prv->decrypt.tail != NULL){
 		r->prev = prv->decrypt.tail;
@@ -1834,8 +2246,10 @@ static void remove_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, DECRYPTOR_ELEM *dec
 	}
 	prv->decrypt.count -= 1;
 
-	release_ts_section(&(dec->ecm_curr));
-	release_ts_section(&(dec->ecm_next));
+	if(dec->ecm != NULL){
+		dec->ecm->release(dec->ecm);
+		dec->ecm = NULL;
+	}
 
 	if(dec->m2 != NULL){
 		dec->m2->release(dec->m2);
@@ -1877,6 +2291,17 @@ static void bind_stream_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, int32_t pid, D
 	if(dec != NULL){
 		prv->map[pid].target = dec;
 		dec->ref += 1;
+	}
+}
+
+static void unlock_all_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv)
+{
+	DECRYPTOR_ELEM *e;
+
+	e = prv->decrypt.head;
+	while(e != NULL){
+		e->locked = 0;
+		e = (DECRYPTOR_ELEM *)(e->next);
 	}
 }
 
@@ -2049,110 +2474,6 @@ static void release_work_buffer(TS_WORK_BUFFER *buf)
 	buf->max = 0;
 }
 
-static int set_ts_section_data(TS_SECTION *sect, TS_HEADER *hdr, uint8_t *data, int32_t size)
-{
-	int m,n;
-	uint8_t *p;
-
-	n = sect->buf.tail - sect->buf.head;
-	
-	if(hdr->payload_unit_start_indicator != 0){ /* new section */
-		reset_ts_section(sect);
-		m = data[0] + 1;
-		p = data + m; /* increment pointer field */
-		if(!append_work_buffer(&(sect->buf), p, size-m)){
-			return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
-		}
-	}else if(n > 0){ /* continuous section */
-		if(!append_work_buffer(&(sect->buf), data, size)){
-			return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
-		}
-	}
-		
-	if(sect->hdr.section_length == 0){
-		m = sect->buf.tail - sect->buf.head;
-		if(m < 9){
-			/* need more data */
-			return 0;
-		}
-		extract_ts_section_header(&(sect->hdr), sect->buf.head);
-	}
-
-	return 0;
-}
-
-static int check_ts_section(TS_SECTION *sect)
-{
-	int m,n;
-
-	if(sect->hdr.section_length < 1){
-		/* not complete */
-		return 0;
-	}
-
-	n = sect->hdr.section_length + 3;
-	m = sect->buf.tail - sect->buf.head;
-	if(m >= n){
-		/* complete */
-		return 1;
-	}
-
-	return 0;
-}
-
-static int check_ts_section_crc(TS_SECTION *sect)
-{
-	int m;
-	uint32_t crc;
-
-	if(sect->hdr.section_length < 1){
-		return 0;
-	}
-
-	m = sect->hdr.section_length + 3;
-	crc = crc32(sect->buf.head, sect->buf.head+m);
-	if(crc != 0){
-		/* crc32 missmatch */
-		return 0;
-	}
-
-	return 1;
-}
-
-static void reset_ts_section(TS_SECTION *sect)
-{
-	sect->buf.head = sect->buf.pool;
-	sect->buf.tail = sect->buf.pool;
-	memset(&(sect->hdr), 0, sizeof(TS_SECTION_HEADER));
-}
-
-static void swap_ts_section(TS_SECTION *curr, TS_SECTION *next)
-{
-	TS_SECTION w;
-
-	memcpy(&w, curr, sizeof(TS_SECTION));
-	memcpy(curr, next, sizeof(TS_SECTION));
-	memcpy(next, &w, sizeof(TS_SECTION));
-}
-
-static int compare_ts_section(TS_SECTION *curr, TS_SECTION *next)
-{
-	int m;
-	
-	if(curr->hdr.section_length != next->hdr.section_length){
-		return 1;
-	}
-
-	m = curr->hdr.section_length + 3;
-	return memcmp(curr->buf.head, next->buf.head, m);
-}
-
-static void release_ts_section(TS_SECTION *sect)
-{
-	release_work_buffer(&(sect->buf));
-	memset(&(sect->hdr), 0, sizeof(TS_SECTION_HEADER));
-}
-
 static void extract_ts_header(TS_HEADER *dst, uint8_t *src)
 {
 	dst->sync                         =  src[0];
@@ -2165,25 +2486,20 @@ static void extract_ts_header(TS_HEADER *dst, uint8_t *src)
 	dst->continuity_counter           =  src[3]       & 0x0f;
 }
 
-static void extract_ts_section_header(TS_SECTION_HEADER *dst, uint8_t *src)
+static void extract_emm_fixed_part(EMM_FIXED_PART *dst, uint8_t *src)
 {
-	dst->table_id                     =  src[0];
-	dst->section_syntax_indicator     = (src[1] >> 7) & 0x01;
-	dst->private_indicator            = (src[1] >> 6) & 0x01;
-	dst->section_length               =((src[1] << 8) | src[2]) & 0x0fff;
-	if(dst->section_syntax_indicator){
-		dst->transport_stream_id    =((src[3] << 8) | src[4]);
-		dst->version_number         = (src[5] >> 1) & 0x1f;
-		dst->current_next_indicator =  src[5]       & 0x01;
-		dst->section_number         =  src[6];
-		dst->last_section_number    =  src[7];
-	}else{
-		dst->transport_stream_id    = 0;
-		dst->version_number         = 0;
-		dst->current_next_indicator = 0;
-		dst->section_number         = 0;
-		dst->last_section_number    = 0;
+	int i;
+
+	dst->card_id = 0;
+	for(i=0;i<6;i++){
+		dst->card_id = (dst->card_id << 8) | src[i];
 	}
+	
+	dst->associated_information_length = src[ 6];
+	dst->protocol_number               = src[ 7];
+	dst->broadcaster_group_id          = src[ 8];
+	dst->update_number                 = (src[ 9]<<8)|src[10];
+	dst->expiration_date               = (src[11]<<8)|src[12];
 }
 
 static int check_unit_invert(unsigned char *head, unsigned char *tail)
@@ -2252,102 +2568,3 @@ static uint8_t *resync_force(uint8_t *head, uint8_t *tail, int32_t unit_size)
 
 	return NULL;
 }
-
-static uint32_t crc32(uint8_t *head, uint8_t *tail)
-{
-	uint32_t crc;
-	uint8_t *p;
-
-	static const uint32_t table[256] = {
-		0x00000000, 0x04C11DB7, 0x09823B6E, 0x0D4326D9,
-		0x130476DC, 0x17C56B6B, 0x1A864DB2, 0x1E475005,
-		0x2608EDB8, 0x22C9F00F, 0x2F8AD6D6, 0x2B4BCB61, 
-		0x350C9B64, 0x31CD86D3, 0x3C8EA00A, 0x384FBDBD,
-		
-		0x4C11DB70, 0x48D0C6C7, 0x4593E01E, 0x4152FDA9,
-		0x5F15ADAC, 0x5BD4B01B, 0x569796C2, 0x52568B75, 
-		0x6A1936C8, 0x6ED82B7F, 0x639B0DA6, 0x675A1011,
-		0x791D4014, 0x7DDC5DA3, 0x709F7B7A, 0x745E66CD,
-		
-		0x9823B6E0, 0x9CE2AB57, 0x91A18D8E, 0x95609039,
-		0x8B27C03C, 0x8FE6DD8B, 0x82A5FB52, 0x8664E6E5,
-		0xBE2B5B58, 0xBAEA46EF, 0xB7A96036, 0xB3687D81, 
-		0xAD2F2D84, 0xA9EE3033, 0xA4AD16EA, 0xA06C0B5D,
-		
-		0xD4326D90, 0xD0F37027, 0xDDB056FE, 0xD9714B49,
-		0xC7361B4C, 0xC3F706FB, 0xCEB42022, 0xCA753D95,
-		0xF23A8028, 0xF6FB9D9F, 0xFBB8BB46, 0xFF79A6F1, 
-		0xE13EF6F4, 0xE5FFEB43, 0xE8BCCD9A, 0xEC7DD02D,
-
-		0x34867077, 0x30476DC0, 0x3D044B19, 0x39C556AE,
-		0x278206AB, 0x23431B1C, 0x2E003DC5, 0x2AC12072, 
-		0x128E9DCF, 0x164F8078, 0x1B0CA6A1, 0x1FCDBB16,
-		0x018AEB13, 0x054BF6A4, 0x0808D07D, 0x0CC9CDCA,
-
-		0x7897AB07, 0x7C56B6B0, 0x71159069, 0x75D48DDE, 
-		0x6B93DDDB, 0x6F52C06C, 0x6211E6B5, 0x66D0FB02,
-		0x5E9F46BF, 0x5A5E5B08, 0x571D7DD1, 0x53DC6066,
-		0x4D9B3063, 0x495A2DD4, 0x44190B0D, 0x40D816BA,
-		
-		0xACA5C697, 0xA864DB20, 0xA527FDF9, 0xA1E6E04E,
-		0xBFA1B04B, 0xBB60ADFC, 0xB6238B25, 0xB2E29692,
-		0x8AAD2B2F, 0x8E6C3698, 0x832F1041, 0x87EE0DF6, 
-		0x99A95DF3, 0x9D684044, 0x902B669D, 0x94EA7B2A,
-
-		0xE0B41DE7, 0xE4750050, 0xE9362689, 0xEDF73B3E,
-		0xF3B06B3B, 0xF771768C, 0xFA325055, 0xFEF34DE2, 
-		0xC6BCF05F, 0xC27DEDE8, 0xCF3ECB31, 0xCBFFD686,
-		0xD5B88683, 0xD1799B34, 0xDC3ABDED, 0xD8FBA05A,
-
-		0x690CE0EE, 0x6DCDFD59, 0x608EDB80, 0x644FC637, 
-		0x7A089632, 0x7EC98B85, 0x738AAD5C, 0x774BB0EB,
-		0x4F040D56, 0x4BC510E1, 0x46863638, 0x42472B8F,
-		0x5C007B8A, 0x58C1663D, 0x558240E4, 0x51435D53, 
-		
-		0x251D3B9E, 0x21DC2629, 0x2C9F00F0, 0x285E1D47,
-		0x36194D42, 0x32D850F5, 0x3F9B762C, 0x3B5A6B9B,
-		0x0315D626, 0x07D4CB91, 0x0A97ED48, 0x0E56F0FF,
-		0x1011A0FA, 0x14D0BD4D, 0x19939B94, 0x1D528623,
-
-		0xF12F560E, 0xF5EE4BB9, 0xF8AD6D60, 0xFC6C70D7,
-		0xE22B20D2, 0xE6EA3D65, 0xEBA91BBC, 0xEF68060B, 
-		0xD727BBB6, 0xD3E6A601, 0xDEA580D8, 0xDA649D6F,
-		0xC423CD6A, 0xC0E2D0DD, 0xCDA1F604, 0xC960EBB3,
-		
-		0xBD3E8D7E, 0xB9FF90C9, 0xB4BCB610, 0xB07DABA7, 
-		0xAE3AFBA2, 0xAAFBE615, 0xA7B8C0CC, 0xA379DD7B,
-		0x9B3660C6, 0x9FF77D71, 0x92B45BA8, 0x9675461F,
-		0x8832161A, 0x8CF30BAD, 0x81B02D74, 0x857130C3, 
-		
-		0x5D8A9099, 0x594B8D2E, 0x5408ABF7, 0x50C9B640,
-		0x4E8EE645, 0x4A4FFBF2, 0x470CDD2B, 0x43CDC09C,
-		0x7B827D21, 0x7F436096, 0x7200464F, 0x76C15BF8,
-		0x68860BFD, 0x6C47164A, 0x61043093, 0x65C52D24,
-
-		0x119B4BE9, 0x155A565E, 0x18197087, 0x1CD86D30,
-		0x029F3D35, 0x065E2082, 0x0B1D065B, 0x0FDC1BEC,
-		0x3793A651, 0x3352BBE6, 0x3E119D3F, 0x3AD08088,
-		0x2497D08D, 0x2056CD3A, 0x2D15EBE3, 0x29D4F654,
-
-		0xC5A92679, 0xC1683BCE, 0xCC2B1D17, 0xC8EA00A0,
-		0xD6AD50A5, 0xD26C4D12, 0xDF2F6BCB, 0xDBEE767C,
-		0xE3A1CBC1, 0xE760D676, 0xEA23F0AF, 0xEEE2ED18,
-		0xF0A5BD1D, 0xF464A0AA, 0xF9278673, 0xFDE69BC4, 
-
-		0x89B8FD09, 0x8D79E0BE, 0x803AC667, 0x84FBDBD0,
-		0x9ABC8BD5, 0x9E7D9662, 0x933EB0BB, 0x97FFAD0C,
-		0xAFB010B1, 0xAB710D06, 0xA6322BDF, 0xA2F33668, 
-		0xBCB4666D, 0xB8757BDA, 0xB5365D03, 0xB1F740B4,
-	};
-	
-	crc = 0xffffffff;
-
-	p = head;
-	while(p < tail){
-		crc = (crc << 8) ^ table[ ((crc >> 24) ^ p[0]) & 0xff ];
-		p += 1;
-	}
-
-	return crc;
-}
-

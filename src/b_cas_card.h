@@ -11,6 +11,11 @@ typedef struct {
 } B_CAS_INIT_STATUS;
 
 typedef struct {
+	int64_t *data;
+	int32_t  count;
+} B_CAS_ID;
+
+typedef struct {
 	uint8_t  scramble_key[16];
 	uint32_t return_code;
 } B_CAS_ECM_RESULT;
@@ -25,7 +30,11 @@ typedef struct {
 
 	int (* get_init_status)(void *bcas, B_CAS_INIT_STATUS *stat);
 
+	int (* get_id)(void *bcas, B_CAS_ID *dst);
+
 	int (* proc_ecm)(void *bcas, B_CAS_ECM_RESULT *dst, uint8_t *src, int len);
+	
+	int (* proc_emm)(void *bcas, uint8_t *src, int len);
 	
 } B_CAS_CARD;
 

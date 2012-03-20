@@ -196,6 +196,10 @@
 				RelativePath=".\src\td.c"
 				>
 			</File>
+			<File
+				RelativePath=".\src\ts_section_parser.c"
+				>
+			</File>
 		</Filter>
 		<Filter
 			Name="ヘッダー ファイル"
@@ -228,6 +232,18 @@
 			</File>
 			<File
 				RelativePath=".\src\portable.h"
+				>
+			</File>
+			<File
+				RelativePath=".\src\ts_common_types.h"
+				>
+			</File>
+			<File
+				RelativePath=".\src\ts_section_parser.h"
+				>
+			</File>
+			<File
+				RelativePath=".\src\ts_section_parser_error_code.h"
 				>
 			</File>
 		</Filter>
