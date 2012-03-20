@@ -337,7 +337,7 @@ static int append_work_buffer(TS_WORK_BUFFER *buf, uint8_t *data, int32_t size);
 static void reset_work_buffer(TS_WORK_BUFFER *buf);
 static void release_work_buffer(TS_WORK_BUFFER *buf);
 
-static int set_ts_section_data(TS_SECTION *sect, uint8_t *data, int32_t size);
+static int set_ts_section_data(TS_SECTION *sect, TS_HEADER *hdr, uint8_t *data, int32_t size);
 static int check_ts_section(TS_SECTION *sect);
 static int check_ts_section_crc(TS_SECTION *sect);
 static void reset_ts_section(TS_SECTION *sect);
@@ -500,7 +500,7 @@ static int flush_arib_std_b25(void *std_b25)
 		}
 
 		if(pid == pgrm->ecm_pid){
-			r = set_ts_section_data(&(pgrm->ecm_next), p, n);
+			r = set_ts_section_data(&(pgrm->ecm_next), &hdr, p, n);
 			if(r < 0){
 				goto LAST;
 			}
@@ -520,7 +520,7 @@ static int flush_arib_std_b25(void *std_b25)
 				}
 			}
 		}else if(pid == pgrm->pmt_pid){
-			r = set_ts_section_data(&(pgrm->pmt_next), p, n);
+			r = set_ts_section_data(&(pgrm->pmt_next), &hdr, p, n);
 			if(r < 0){
 				goto LAST;
 			}
@@ -543,7 +543,7 @@ static int flush_arib_std_b25(void *std_b25)
 				goto LAST;
 			}
 		}else if(pid == 0x0000){
-			r = set_ts_section_data(&(prv->pat_next), p, n);
+			r = set_ts_section_data(&(prv->pat_next), &hdr, p, n);
 			if(r < 0){
 				goto LAST;
 			}
@@ -833,7 +833,7 @@ static int find_pat(ARIB_STD_B25_PRIVATE_DATA *prv)
 				p += (p[0]+1);
 			}
 			n = 188 - (p-curr);
-			r = set_ts_section_data(&(prv->pat_next), p, n);
+			r = set_ts_section_data(&(prv->pat_next), &hdr, p, n);
 			if(r < 0){
 				goto LAST;
 			}
@@ -966,7 +966,7 @@ static int find_pmt(ARIB_STD_B25_PRIVATE_DATA *prv)
 				p += (p[0]+1);
 			}
 			n = 188 - (p-curr);
-			r = set_ts_section_data(&(pgrm->pmt_next), p, n);
+			r = set_ts_section_data(&(pgrm->pmt_next), &hdr, p, n);
 			if(r < 0){
 				goto LAST;
 			}
@@ -1206,7 +1206,7 @@ static int find_ecm(ARIB_STD_B25_PRIVATE_DATA *prv)
 				p += (p[0]+1);
 			}
 			n = 188 - (p-curr);
-			r = set_ts_section_data(&(pgrm->ecm_next), p, n);
+			r = set_ts_section_data(&(pgrm->ecm_next), &hdr, p, n);
 			if(r < 0){
 				goto LAST;
 			}
@@ -1365,6 +1365,9 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 			n = 188 - (p-curr);
 		
 			if( (crypt != 0) && (pgrm->m2 != NULL) ){
+				if(hdr.payload_unit_start_indicator == 1){
+					r = 0;
+				}
 				m = pgrm->m2->decrypt(pgrm->m2, crypt, p, n);
 				if(m < 0){
 					r = ARIB_STD_B25_ERROR_DECRYPT_FAILURE;
@@ -1380,7 +1383,7 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 		}
 
 		if(pid == pgrm->ecm_pid){
-			r = set_ts_section_data(&(pgrm->ecm_next), p, n);
+			r = set_ts_section_data(&(pgrm->ecm_next), &hdr, p, n);
 			if(r < 0){
 				goto LAST;
 			}
@@ -1400,7 +1403,7 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 				}
 			}
 		}else if(pid == pgrm->pmt_pid){
-			r = set_ts_section_data(&(pgrm->pmt_next), p, n);
+			r = set_ts_section_data(&(pgrm->pmt_next), &hdr, p, n);
 			if(r < 0){
 				goto LAST;
 			}
@@ -1423,7 +1426,7 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 				goto LAST;
 			}
 		}else if(pid == 0x0000){
-			r = set_ts_section_data(&(prv->pat_next), p, n);
+			r = set_ts_section_data(&(prv->pat_next), &hdr, p, n);
 			if(r < 0){
 				goto LAST;
 			}
@@ -1529,6 +1532,11 @@ static int append_work_buffer(TS_WORK_BUFFER *buf, uint8_t *data, int32_t size)
 {
 	int m;
 
+	if(size < 1){
+		/* ignore - do nothing */
+		return 1;
+	}
+
 	m = buf->tail - buf->pool;
 
 	if( (m+size) > buf->max ){
@@ -1560,19 +1568,21 @@ static void release_work_buffer(TS_WORK_BUFFER *buf)
 	buf->max = 0;
 }
 
-static int set_ts_section_data(TS_SECTION *sect, uint8_t *data, int32_t size)
+static int set_ts_section_data(TS_SECTION *sect, TS_HEADER *hdr, uint8_t *data, int32_t size)
 {
 	int m,n;
 	uint8_t *p;
 
 	n = sect->buf.tail - sect->buf.head;
-	if(n == 0){ /* new section */
+	
+	if(hdr->payload_unit_start_indicator != 0){ /* new section */
+		reset_ts_section(sect);
 		m = data[0] + 1;
 		p = data + m; /* increment pointer field */
 		if(!append_work_buffer(&(sect->buf), p, size-m)){
 			return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
 		}
-	}else{ /* continuous section */
+	}else if(n > 0){ /* continuous section */
 		if(!append_work_buffer(&(sect->buf), data, size)){
 			return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
 		}

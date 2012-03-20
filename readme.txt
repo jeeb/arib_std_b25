@@ -2,10 +2,22 @@
 
 　ARIB STD-B25 仕様確認テストプログラムソースコード
 
+【バージョン】
+
+　0.1.1
+
 【作者】
 
 　茂木 和洋 (MOGI, Kazuhiro) 
 　kazhiro@marumo.ne.jp
+
+【一次配布元】
+
+　http://www.marumo.ne.jp/db2008_1.htm#7
+
+　あるいは
+
+　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.1.lzh
 
 【目的】
 
@@ -151,3 +163,22 @@
 　・終了時
 
 　　1 各モジュールが確保したリソースを解放する
+
+【更新履歴】
+
+　・2008, 1/7 - ver. 0.1.1
+
+　　セクション (PAT/PMT/ECM 等) が複数の TS パケットに分割されている
+　　場合に、正常に処理できなかったり、例外を発生をさせることがある
+　　バグを修正
+
+　　http://www.marumo.ne.jp/db2008_1.htm#7 又は
+　　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.1.lzh
+
+　・2007, 11/25 - ver. 0.1.0
+
+　　公開
+
+　　http://www.marumo.ne.jp/db2007_b.htm#25 又は
+　　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.0.lzh
+

@@ -49,7 +49,7 @@ int main(int argc, char **argv)
 
 static void show_usage()
 {
-	fprintf(stderr, "b25 - ARIB STD-B25 test program ver. 0.1.0\n");
+	fprintf(stderr, "b25 - ARIB STD-B25 test program ver. 0.1.1\n");
 	fprintf(stderr, "usage: b25 [options] src.m2t dst.m2t\n");
 	fprintf(stderr, "options:\n");
 	fprintf(stderr, "  -r round (integer, default=4)\n");
