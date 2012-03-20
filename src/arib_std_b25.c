@@ -86,6 +86,7 @@ typedef struct {
 
 	int32_t            multi2_round;
 	int32_t            strip;
+	int32_t            emm_proc_on;
 	
 	int32_t            unit_size;
 
@@ -311,6 +312,7 @@ enum PID_MAP_TYPE {
 static void release_arib_std_b25(void *std_b25);
 static int set_multi2_round_arib_std_b25(void *std_b25, int32_t round);
 static int set_strip_arib_std_b25(void *std_b25, int32_t strip);
+static int set_emm_proc_arib_std_b25(void *std_b25, int32_t on);
 static int set_b_cas_card_arib_std_b25(void *std_b25, B_CAS_CARD *bcas);
 static int reset_arib_std_b25(void *std_b25);
 static int flush_arib_std_b25(void *std_b25);
@@ -345,6 +347,7 @@ ARIB_STD_B25 *create_arib_std_b25()
 	r->release = release_arib_std_b25;
 	r->set_multi2_round = set_multi2_round_arib_std_b25;
 	r->set_strip = set_strip_arib_std_b25;
+	r->set_emm_proc = set_emm_proc_arib_std_b25;
 	r->set_b_cas_card = set_b_cas_card_arib_std_b25;
 	r->reset = reset_arib_std_b25;
 	r->flush = flush_arib_std_b25;
@@ -448,6 +451,20 @@ static int set_strip_arib_std_b25(void *std_b25, int32_t strip)
 	}
 
 	prv->strip = strip;
+
+	return 0;
+}
+
+static int set_emm_proc_arib_std_b25(void *std_b25, int32_t on)
+{
+	ARIB_STD_B25_PRIVATE_DATA *prv;
+
+	prv = private_data(std_b25);
+	if(prv == NULL){
+		return ARIB_STD_B25_ERROR_INVALID_PARAM;
+	}
+
+	prv->emm_proc_on = on;
 
 	return 0;
 }
@@ -642,6 +659,9 @@ static int flush_arib_std_b25(void *std_b25)
 				goto LAST;
 			}
 		}else if(prv->map[pid].type == PID_MAP_TYPE_EMM){
+			if( prv->emm_proc_on == 0){
+				goto NEXT;
+			}
 			if( prv->emm == NULL ){
 				prv->emm = create_ts_section_parser();
 				if(prv->emm == NULL){
@@ -1808,6 +1828,9 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 			
 			if(prv->map[pid].type == PID_MAP_TYPE_OTHER){
 				dec = (DECRYPTOR_ELEM *)(prv->map[pid].target);
+			}else if( (prv->map[pid].type == 0) &&
+			          (prv->decrypt.count == 1) ){
+				dec = prv->decrypt.head;
 			}else{
 				dec = NULL;
 			}
@@ -1881,6 +1904,9 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 				goto LAST;
 			}
 		}else if(prv->map[pid].type == PID_MAP_TYPE_EMM){
+			if( prv->emm_proc_on == 0){
+				goto NEXT;
+			}
 			if( prv->emm == NULL ){
 				prv->emm = create_ts_section_parser();
 				if(prv->emm == NULL){
@@ -1952,9 +1978,7 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 				goto NEXT;
 			}
 			r = proc_pat(prv);
-			if(r < 0){
-				goto LAST;
-			}
+			goto LAST;
 		}
 			
 	NEXT:

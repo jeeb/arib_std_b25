@@ -16,11 +16,15 @@
 typedef struct {
 	int32_t round;
 	int32_t strip;
+	int32_t emm;
+	int32_t verbose;
+	int32_t power_ctrl;
 } OPTION;
 
 static void show_usage();
 static int parse_arg(OPTION *dst, int argc, char **argv);
 static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt);
+static void show_bcas_power_on_control_info(B_CAS_CARD *bcas);
 
 int main(int argc, char **argv)
 {
@@ -50,13 +54,22 @@ int main(int argc, char **argv)
 
 static void show_usage()
 {
-	fprintf(stderr, "b25 - ARIB STD-B25 test program ver. 0.2.0 (2008, 4/6)\n");
+	fprintf(stderr, "b25 - ARIB STD-B25 test program ver. 0.2.1 (2008, 4/9)\n");
 	fprintf(stderr, "usage: b25 [options] src.m2t dst.m2t\n");
 	fprintf(stderr, "options:\n");
 	fprintf(stderr, "  -r round (integer, default=4)\n");
 	fprintf(stderr, "  -s strip\n");
 	fprintf(stderr, "     0: keep null(padding) stream (default)\n");
 	fprintf(stderr, "     1: strip null stream\n");
+	fprintf(stderr, "  -m EMM\n");
+	fprintf(stderr, "     0: ignore EMM (default)\n");
+	fprintf(stderr, "     1: send EMM to B-CAS card\n");
+	fprintf(stderr, "  -p power_on_control_info\n");
+	fprintf(stderr, "     0: do nothing additionaly\n");
+	fprintf(stderr, "     1: show B-CAS EMM receiving request (default)\n");
+	fprintf(stderr, "  -v verbose\n");
+	fprintf(stderr, "     0: silent\n");
+	fprintf(stderr, "     1: show processing status (default)\n");
 	fprintf(stderr, "\n");
 }
 
@@ -66,12 +79,31 @@ static int parse_arg(OPTION *dst, int argc, char **argv)
 	
 	dst->round = 4;
 	dst->strip = 0;
+	dst->emm = 0;
+	dst->power_ctrl = 1;
+	dst->verbose = 1;
 
 	for(i=1;i<argc;i++){
 		if(argv[i][0] != '-'){
 			break;
 		}
 		switch(argv[i][1]){
+		case 'm':
+			if(argv[i][2]){
+				dst->emm = atoi(argv[i]+2);
+			}else{
+				dst->emm = atoi(argv[i+1]);
+				i += 1;
+			}
+			break;
+		case 'p':
+			if(argv[i][2]){
+				dst->power_ctrl = atoi(argv[i]+2);
+			}else{
+				dst->power_ctrl = atoi(argv[i+1]);
+				i += 1;
+			}
+			break;
 		case 'r':
 			if(argv[i][2]){
 				dst->round = atoi(argv[i]+2);
@@ -85,6 +117,14 @@ static int parse_arg(OPTION *dst, int argc, char **argv)
 				dst->strip = atoi(argv[i]+2);
 			}else{
 				dst->strip = atoi(argv[i+1]);
+				i += 1;
+			}
+			break;
+		case 'v':
+			if(argv[i][2]){
+				dst->verbose = atoi(argv[i]+2);
+			}else{
+				dst->verbose = atoi(argv[i+1]);
 				i += 1;
 			}
 			break;
@@ -148,6 +188,12 @@ static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 		goto LAST;
 	}
 
+	code = b25->set_emm_proc(b25, opt->emm);
+	if(code < 0){
+		fprintf(stderr, "error - failed on ARIB_STD_B25::set_emm_proc() : code=%d\n", code);
+		goto LAST;
+	}
+
 	bcas = create_b_cas_card();
 	if(bcas == NULL){
 		fprintf(stderr, "error - failed on create_b_cas_card()\n");
@@ -177,6 +223,10 @@ static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 		sbuf.data = data;
 		sbuf.size = n;
 
+		if(offset == 0x000000006dfd2000){
+			offset = 0x000000006dfd2000;
+		}
+
 		code = b25->put(b25, &sbuf);
 		if(code < 0){
 			fprintf(stderr, "error - failed on ARIB_STD_B25::put() : code=%d\n", code);
@@ -198,8 +248,10 @@ static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 		}
 		
 		offset += sbuf.size;
-		m = (int)(10000*offset/total);
-		fprintf(stderr, "\rprocessing: %2d.%02d%% ", m/100, m%100);
+		if(opt->verbose != 0){
+			m = (int)(10000*offset/total);
+			fprintf(stderr, "\rprocessing: %2d.%02d%% ", m/100, m%100);
+		}
 	}
 
 	code = b25->flush(b25);
@@ -222,7 +274,11 @@ static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 		}
 	}
 
-	fprintf(stderr, "\rprocessing: finish\n");
+	if(opt->verbose != 0){
+		fprintf(stderr, "\rprocessing: finish  \n");
+		fflush(stderr);
+		fflush(stdout);
+	}
 
 	n = b25->get_program_count(b25);
 	if(n < 0){
@@ -244,7 +300,11 @@ static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 			fprintf(stderr, "  total TS packet:       %d\n", pgrm.total_packet_count);
 		}
 	}
-	
+
+	if(opt->power_ctrl != 0){
+		show_bcas_power_on_control_info(bcas);
+	}
+
 LAST:
 
 	if(sfd >= 0){
@@ -268,4 +328,43 @@ LAST:
 	}
 }
 
+static void show_bcas_power_on_control_info(B_CAS_CARD *bcas)
+{
+	int code;
+	int i,w;
+	B_CAS_PWR_ON_CTRL_INFO pwc;
+
+	code = bcas->get_pwr_on_ctrl(bcas, &pwc);
+	if(code < 0){
+		fprintf(stderr, "error - failed on B_CAS_CARD::get_pwr_on_ctrl() : code=%d\n", code);
+		return;
+	}
+
+	if(pwc.count == 0){
+		fprintf(stdout, "no EMM receiving request\n");
+		return;
+	}
+
+	fprintf(stdout, "total %d EMM receiving request\n", pwc.count);
+	for(i=0;i<pwc.count;i++){
+		fprintf(stdout, "+ [%d] : tune ", i);
+		switch(pwc.data[i].network_id){
+		case 4:
+			w = pwc.data[i].transport_id;
+			fprintf(stdout, "BS-%d/TS-%d ", ((w >> 4) & 0x1f), (w & 7));
+			break;
+		case 6:
+		case 7:
+			w = pwc.data[i].transport_id;
+			fprintf(stdout, "ND-%d/TS-%d ", ((w >> 4) & 0x1f), (w & 7));
+			break;
+		default:
+			fprintf(stdout, "unknown(b:0x%02x,n:0x%04x,t:0x%04x) ", pwc.data[i].broadcaster_group_id, pwc.data[i].network_id, pwc.data[i].transport_id);
+			break;
+		}
+		fprintf(stdout, "between %04d %02d/%02d ", pwc.data[i].s_yy, pwc.data[i].s_mm, pwc.data[i].s_dd);
+		fprintf(stdout, "to %04d %02d/%02d ", pwc.data[i].l_yy, pwc.data[i].l_mm, pwc.data[i].l_dd);
+		fprintf(stdout, "least %d hours\n", pwc.data[i].hold_time);
+	}
+}
 
