@@ -49,5 +49,9 @@ extern "C" {
 
 extern ARIB_STD_B25 *create_arib_std_b25();
 
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* ARIB_STD_B25_H */
 

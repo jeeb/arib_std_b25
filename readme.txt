@@ -4,7 +4,7 @@
 
 【バージョン】
 
-　0.1.6
+　0.1.7
 
 【作者】
 
@@ -13,11 +13,11 @@
 
 【一次配布元】
 
-　http://www.marumo.ne.jp/db2008_3.htm#16
+　http://www.marumo.ne.jp/db2008_3.htm#17
 
 　あるいは
 
-　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.6.lzh
+　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.7.lzh
 
 【目的】
 
@@ -180,11 +180,23 @@
 
 【更新履歴】
 
+　・2008, 3/17 - ver. 0.1.7
+
+　　arib_std_b25.h に「extern "C" {」を閉じるコードがなかった問題 
+　　(C++ コードから利用する場合にコンパイルエラーを発生させる) を
+　　修正
+
+　　TS パケットの中途でストリームが切り替わるケースで問題が発生し
+　　にくくなるように、arib_std_b25.c 内のコードを修正
+
+　　http://www.marumo.ne.jp/db2008_3.htm#17 又は
+　　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.7.lzh
+
 　・2008, 3/16 - ver. 0.1.6
 
 　　PMT 更新の際、ECM 関連の状況が変更 (スクランブル - ノンスク
 　　ランブルの切り替えや、ECM PID の変更等) が行われても、それが
-　　反映されていなかった
+　　反映されていなかった問題を修正
 
 　　http://www.marumo.ne.jp/db2008_3.htm#16 又は
 　　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.6.lzh

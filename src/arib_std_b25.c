@@ -532,6 +532,7 @@ static int flush_arib_std_b25(void *std_b25)
 	r = 0;
 
 	while( (curr+188) <= tail ){
+		
 		if(curr[0] != 0x47){
 			p = resync_force(curr, tail, unit);
 			if(p == NULL){
@@ -539,11 +540,21 @@ static int flush_arib_std_b25(void *std_b25)
 			}
 			curr = p;
 		}
+		
 		extract_ts_header(&hdr, curr);
 		crypt = hdr.transport_scrambling_control;
 		pid = hdr.pid;
 		
 		p = curr+4;
+		if(hdr.adaptation_field_control & 0x02){
+			p += (p[0]+1);
+		}
+		n = 188 - (p-curr);
+		if( (n < 1) && ((n < 0) || (hdr.adaptation_field_control & 0x01)) ){
+			/* broken packet */
+			curr += 1;
+			continue;
+		}
 
 		if( (crypt != 0) &&
 		    (hdr.adaptation_field_control & 0x01) ){
@@ -554,11 +565,6 @@ static int flush_arib_std_b25(void *std_b25)
 				dec = NULL;
 			}
 
-			if(hdr.adaptation_field_control & 0x02){
-				p += (p[0]+1);
-			}
-			n = 188 - (p-curr);
-		
 			if( (dec != NULL) && (dec->m2 != NULL) ){
 				m = dec->m2->decrypt(dec->m2, crypt, p, n);
 				if(m < 0){
@@ -571,10 +577,6 @@ static int flush_arib_std_b25(void *std_b25)
 				prv->map[pid].undecrypted += 1;
 			}
 		}else{
-			if(hdr.adaptation_field_control & 0x02){
-				p += (p[0]+1);
-			}
-			n = 188 - (p-curr);
 			prv->map[pid].normal_packet += 1;
 		}
 
@@ -1541,19 +1543,30 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 
 	r = 0;
 
-	while( (curr+unit) <= tail ){
-		if(curr[0] != 0x47){
+	while( (curr+unit) < tail ){
+		
+		if( (curr[0] != 0x47) || (curr[unit] != 0x47) ){
 			p = resync(curr, tail, unit);
 			if(p == NULL){
 				goto LAST;
 			}
 			curr = p;
 		}
+		
 		extract_ts_header(&hdr, curr);
 		crypt = hdr.transport_scrambling_control;
 		pid = hdr.pid;
-		
+
 		p = curr+4;
+		if(hdr.adaptation_field_control & 0x02){
+			p += (p[0]+1);
+		}
+		n = 188 - (p-curr);
+		if( (n < 1) && ((n < 0) || (hdr.adaptation_field_control & 0x01)) ){
+			/* broken packet */
+			curr += 1;
+			continue;
+		}
 
 		if( (crypt != 0) &&
 		    (hdr.adaptation_field_control & 0x01) ){
@@ -1564,11 +1577,6 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 				dec = NULL;
 			}
 
-			if(hdr.adaptation_field_control & 0x02){
-				p += (p[0]+1);
-			}
-			n = 188 - (p-curr);
-		
 			if( (dec != NULL) && (dec->m2 != NULL) ){
 				m = dec->m2->decrypt(dec->m2, crypt, p, n);
 				if(m < 0){
@@ -1581,10 +1589,6 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 				prv->map[pid].undecrypted += 1;
 			}
 		}else{
-			if(hdr.adaptation_field_control & 0x02){
-				p += (p[0]+1);
-			}
-			n = 188 - (p-curr);
 			prv->map[pid].normal_packet += 1;
 		}
 
