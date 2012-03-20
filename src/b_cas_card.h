@@ -12,6 +12,7 @@ typedef struct {
 
 typedef struct {
 	uint8_t  scramble_key[16];
+	uint32_t return_code;
 } B_CAS_ECM_RESULT;
 
 typedef struct {

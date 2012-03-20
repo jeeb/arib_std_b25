@@ -11,6 +11,20 @@ typedef struct {
 
 typedef struct {
 
+	int32_t  program_number; /* channel */
+	
+	int32_t  ecm_unpurchased_count;
+	int32_t  last_ecm_error_code;
+
+	int32_t  padding;
+
+	int64_t  total_packet_count;
+	int64_t  undecrypted_packet_count;
+	
+} ARIB_STD_B25_PROGRAM_INFO;
+
+typedef struct {
+
 	void *private_data;
 
 	void (* release)(void *std_b25);
@@ -23,6 +37,9 @@ typedef struct {
 
 	int (* put)(void *std_b25, ARIB_STD_B25_BUFFER *buf);
 	int (* get)(void *std_b25, ARIB_STD_B25_BUFFER *buf);
+
+	int (* get_program_count)(void *std_b25);
+	int (* get_program_info)(void *std_b25, ARIB_STD_B25_PROGRAM_INFO *info, int32_t idx);
 
 } ARIB_STD_B25;
 

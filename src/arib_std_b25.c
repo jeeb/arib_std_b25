@@ -65,6 +65,8 @@ typedef struct {
 typedef struct {
 
 	int32_t           phase;
+
+	int32_t           program_number;
 	
 	int32_t           pmt_pid;
 	TS_SECTION        pmt_curr;
@@ -87,6 +89,9 @@ typedef struct {
 
 	MULTI2           *m2;
 
+	int32_t           unpurchased;
+	int32_t           last_error;
+
 	void             *prev;
 	void             *next;
 
@@ -101,6 +106,8 @@ typedef struct {
 typedef struct {
 	uint32_t          ref;
 	uint32_t          type;
+	int64_t           normal_packet;
+	int64_t           undecrypted;
 	void             *target;
 } PID_MAP;
 
@@ -322,6 +329,8 @@ static int reset_arib_std_b25(void *std_b25);
 static int flush_arib_std_b25(void *std_b25);
 static int put_arib_std_b25(void *std_b25, ARIB_STD_B25_BUFFER *buf);
 static int get_arib_std_b25(void *std_b25, ARIB_STD_B25_BUFFER *buf);
+static int get_program_count_arib_std_b25(void *std_b25);
+static int get_program_info_arib_std_b25(void *std_b25, ARIB_STD_B25_PROGRAM_INFO *info, int idx);
 
 /*+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  global function implementation
@@ -353,6 +362,8 @@ ARIB_STD_B25 *create_arib_std_b25()
 	r->flush = flush_arib_std_b25;
 	r->put = put_arib_std_b25;
 	r->get = get_arib_std_b25;
+	r->get_program_count = get_program_count_arib_std_b25;
+	r->get_program_info = get_program_info_arib_std_b25;
 
 	return r;
 }
@@ -369,7 +380,7 @@ static int check_pmt_complete(ARIB_STD_B25_PRIVATE_DATA *prv);
 static int find_pmt(ARIB_STD_B25_PRIVATE_DATA *prv);
 static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm);
 static int32_t find_ca_descriptor_pid(uint8_t *head, uint8_t *tail);
-static int32_t count_pmt_stream(uint8_t *head, uint8_t *tail);
+static int32_t add_ecm_stream(ARIB_STD_B25_PRIVATE_DATA *prv, TS_STREAM_LIST *list, int32_t ecm_pid);
 static int check_ecm_complete(ARIB_STD_B25_PRIVATE_DATA *prv);
 static int find_ecm(ARIB_STD_B25_PRIVATE_DATA *prv);
 static int proc_ecm(DECRYPTOR_ELEM *dec, B_CAS_CARD *bcas);
@@ -381,6 +392,7 @@ static DECRYPTOR_ELEM *set_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, int32_t pid
 static void remove_decryptor(ARIB_STD_B25_PRIVATE_DATA *prv, DECRYPTOR_ELEM *dec);
 
 static TS_STREAM_ELEM *get_stream_list_head(TS_STREAM_LIST *list);
+static TS_STREAM_ELEM *find_stream_list_elem(TS_STREAM_LIST *list, int32_t pid);
 static TS_STREAM_ELEM *create_stream_elem(int32_t pid, int32_t type);
 static void put_stream_list_tail(TS_STREAM_LIST *list, TS_STREAM_ELEM *elem);
 static void clear_stream_list(TS_STREAM_LIST *list);
@@ -539,17 +551,23 @@ static int flush_arib_std_b25(void *std_b25)
 			}
 			n = 188 - (p-curr);
 		
-			if( dec != NULL ){
-				if(hdr.payload_unit_start_indicator == 1){
-					r = 0;
-				}
+			if( (dec != NULL) && (dec->m2 != NULL) ){
 				m = dec->m2->decrypt(dec->m2, crypt, p, n);
 				if(m < 0){
 					r = ARIB_STD_B25_ERROR_DECRYPT_FAILURE;
 					goto LAST;
 				}
 				curr[3] &= 0x3f;
+				prv->map[pid].normal_packet += 1;
+			}else{
+				prv->map[pid].undecrypted += 1;
 			}
+		}else{
+			if(hdr.adaptation_field_control & 0x02){
+				p += (p[0]+1);
+			}
+			n = 188 - (p-curr);
+			prv->map[pid].normal_packet += 1;
 		}
 
 		if(!append_work_buffer(&(prv->dbuf), curr, 188)){
@@ -739,6 +757,63 @@ static int get_arib_std_b25(void *std_b25, ARIB_STD_B25_BUFFER *buf)
 
 	return 0;
 }
+
+static int get_program_count_arib_std_b25(void *std_b25)
+{
+	ARIB_STD_B25_PRIVATE_DATA *prv;
+	
+	prv = private_data(std_b25);
+	if(prv == NULL){
+		return ARIB_STD_B25_ERROR_INVALID_PARAM;
+	}
+
+	return prv->p_count;
+}
+
+static int get_program_info_arib_std_b25(void *std_b25, ARIB_STD_B25_PROGRAM_INFO *info, int idx)
+{
+	ARIB_STD_B25_PRIVATE_DATA *prv;
+
+	TS_PROGRAM *pgrm;
+	
+	TS_STREAM_ELEM *strm;
+	DECRYPTOR_ELEM *dec;
+
+	int32_t pid;
+	
+	prv = private_data(std_b25);
+	if( (prv == NULL) || (info == NULL) || (idx < 0) || (idx >= prv->p_count) ){
+		return ARIB_STD_B25_ERROR_INVALID_PARAM;
+	}
+
+	pgrm = prv->program + idx;
+
+	memset(info, 0, sizeof(ARIB_STD_B25_PROGRAM_INFO));
+
+	info->program_number = pgrm->program_number;
+	
+	pid = pgrm->pmt_pid;
+	info->total_packet_count += prv->map[pid].normal_packet;
+	info->total_packet_count += prv->map[pid].undecrypted;
+	info->undecrypted_packet_count += prv->map[pid].undecrypted;
+
+	strm = pgrm->streams.head;
+	while(strm != NULL){
+		pid = strm->pid;
+		if(prv->map[pid].type == PID_MAP_TYPE_ECM){
+			dec = (DECRYPTOR_ELEM *)(prv->map[pid].target);
+			info->ecm_unpurchased_count += dec->unpurchased;
+			info->last_ecm_error_code = dec->last_error;
+		}
+		info->total_packet_count += prv->map[pid].normal_packet;
+		info->total_packet_count += prv->map[pid].undecrypted;
+		info->undecrypted_packet_count += prv->map[pid].undecrypted;
+		strm = (TS_STREAM_ELEM *)(strm->next);
+	}
+
+	return 0;
+}
+
 /*+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  private method implementation
  ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
@@ -968,6 +1043,7 @@ static int proc_pat(ARIB_STD_B25_PRIVATE_DATA *prv)
 		program_number = ((head[0] << 8) | head[1]);
 		pid = ((head[2] << 8) | head[3]) & 0x1fff;
 		if(program_number != 0){
+			work[i].program_number = program_number;
 			work[i].pmt_pid = pid;
 			prv->map[pid].type = PID_MAP_TYPE_PMT;
 			prv->map[pid].target = work+i;
@@ -1163,6 +1239,10 @@ static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 		put_stream_list_tail(&(prv->strm_pool), strm);
 	}
 
+	if(!add_ecm_stream(prv, &(pgrm->streams), ecm_pid)){
+		return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+	}
+
 	/* add current stream entries */
 	while( head+4 < tail ){
 
@@ -1176,6 +1256,9 @@ static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 		if( (ecm_pid != 0) && (ecm_pid != 0x1fff) ){
 			dec[1] = set_decryptor(prv, ecm_pid);
 			if(dec[1] == NULL){
+				return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
+			}
+			if(!add_ecm_stream(prv, &(pgrm->streams), ecm_pid)){
 				return ARIB_STD_B25_ERROR_NO_ENOUGH_MEMORY;
 			}
 		}else{
@@ -1199,7 +1282,7 @@ static int proc_pmt(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 			if( dec[1] != NULL ){
 				prv->map[pid].target = dec[1];
 				dec[1]->ref += 1;
-			}else if( dec[0] != NULL ){
+			}else if( (dec[0] != NULL) && (ecm_pid == 0) ){
 				prv->map[pid].target = dec[0];
 				dec[0]->ref += 1;
 			}else{
@@ -1244,6 +1327,32 @@ static int32_t find_ca_descriptor_pid(uint8_t *head, uint8_t *tail)
 	}
 
 	return 0;
+}
+
+static int add_ecm_stream(ARIB_STD_B25_PRIVATE_DATA *prv, TS_STREAM_LIST *list, int32_t ecm_pid)
+{
+	TS_STREAM_ELEM *strm;
+
+	strm = find_stream_list_elem(list, ecm_pid);
+	if(strm != NULL){
+		// ECM is already registered
+		return 1;
+	}
+
+	strm = get_stream_list_head(&(prv->strm_pool));
+	if(strm == NULL){
+		strm = create_stream_elem(ecm_pid, PID_MAP_TYPE_ECM);
+		if(strm == NULL){
+			return 0;
+		}
+	}else{
+		strm->pid = ecm_pid;
+		strm->type = PID_MAP_TYPE_ECM;
+	}
+
+	put_stream_list_tail(list, strm);
+
+	return 1;
 }
 
 static int check_ecm_complete(ARIB_STD_B25_PRIVATE_DATA *prv)
@@ -1362,6 +1471,28 @@ static int proc_ecm(DECRYPTOR_ELEM *dec, B_CAS_CARD *bcas)
 
 	r = 0;
 	
+	offset = 8;
+	length = dec->ecm_curr.hdr.section_length - (5+4);
+	p = dec->ecm_curr.buf.head + offset;
+
+	r = bcas->proc_ecm(bcas, &res, p, length);
+	if(r < 0){
+		dec->m2->clear_scramble_key(dec->m2);
+		return ARIB_STD_B25_ERROR_ECM_PROC_FAILURE;
+	}
+	if( (res.return_code != 0x0800) &&
+	    (res.return_code != 0x0400) &&
+	    (res.return_code != 0x0200) ){
+		/* return_code is not equal "purchased" */
+		if(dec->m2 != NULL){
+			dec->m2->release(dec->m2);
+			dec->m2 = NULL;
+		}
+		dec->unpurchased += 1;
+		dec->last_error = res.return_code;
+		return ARIB_STD_B25_WARN_UNPURCHASED_ECM;
+	}
+
 	if(dec->m2 == NULL){
 		dec->m2 = create_multi2();
 		if(dec->m2 == NULL){
@@ -1373,16 +1504,6 @@ static int proc_ecm(DECRYPTOR_ELEM *dec, B_CAS_CARD *bcas)
 		}
 		dec->m2->set_system_key(dec->m2, is.system_key);
 		dec->m2->set_init_cbc(dec->m2, is.init_cbc);
-	}
-
-	offset = 8;
-	length = dec->ecm_curr.hdr.section_length - (5+4);
-	p = dec->ecm_curr.buf.head + offset;
-
-	r = bcas->proc_ecm(bcas, &res, p, length);
-	if(r < 0){
-		dec->m2->clear_scramble_key(dec->m2);
-		return ARIB_STD_B25_ERROR_ECM_PROC_FAILURE;
 	}
 
 	dec->m2->set_scramble_key(dec->m2, res.scramble_key);
@@ -1444,17 +1565,23 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 			}
 			n = 188 - (p-curr);
 		
-			if( dec != NULL ){
-				if(hdr.payload_unit_start_indicator == 1){
-					r = 0;
-				}
+			if( (dec != NULL) && (dec->m2 != NULL) ){
 				m = dec->m2->decrypt(dec->m2, crypt, p, n);
 				if(m < 0){
 					r = ARIB_STD_B25_ERROR_DECRYPT_FAILURE;
 					goto LAST;
 				}
 				curr[3] &= 0x3f;
+				prv->map[pid].normal_packet += 1;
+			}else{
+				prv->map[pid].undecrypted += 1;
 			}
+		}else{
+			if(hdr.adaptation_field_control & 0x02){
+				p += (p[0]+1);
+			}
+			n = 188 - (p-curr);
+			prv->map[pid].normal_packet += 1;
 		}
 
 		if(!append_work_buffer(&(prv->dbuf), curr, 188)){
@@ -1560,7 +1687,9 @@ static void release_program(ARIB_STD_B25_PRIVATE_DATA *prv, TS_PROGRAM *pgrm)
 
 	while( (strm = get_stream_list_head(&(pgrm->streams))) != NULL ){
 		pid = strm->pid;
-		prv->map[pid].ref -= 1;
+		if(strm->type <= 0xff){
+			prv->map[pid].ref -= 1;
+		}
 		if( prv->map[pid].ref < 1 ){
 			if( (prv->map[pid].type == PID_MAP_TYPE_OTHER) &&
 			    (prv->map[pid].target != NULL) ){
@@ -1679,6 +1808,21 @@ static TS_STREAM_ELEM *get_stream_list_head(TS_STREAM_LIST *list)
 
 	r->prev = NULL;
 	r->next = NULL;
+
+	return r;
+}
+
+static TS_STREAM_ELEM *find_stream_list_elem(TS_STREAM_LIST *list, int32_t pid)
+{
+	TS_STREAM_ELEM *r;
+
+	r = list->head;
+	while(r != NULL){
+		if(r->pid == pid){
+			break;
+		}
+		r = (TS_STREAM_ELEM *)(r->next);
+	}
 
 	return r;
 }

@@ -226,6 +226,7 @@ static int proc_ecm_b_cas_card(void *bcas, B_CAS_ECM_RESULT *dst, uint8_t *src, 
 	}
 
 	memcpy(dst->scramble_key, prv->rbuf+6, 16);
+	dst->return_code = load_be_uint16(prv->rbuf+4);
 
 	return 0;
 }

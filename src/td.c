@@ -49,7 +49,7 @@ int main(int argc, char **argv)
 
 static void show_usage()
 {
-	fprintf(stderr, "b25 - ARIB STD-B25 test program ver. 0.1.2\n");
+	fprintf(stderr, "b25 - ARIB STD-B25 test program ver. 0.1.3\n");
 	fprintf(stderr, "usage: b25 [options] src.m2t dst.m2t\n");
 	fprintf(stderr, "options:\n");
 	fprintf(stderr, "  -r round (integer, default=4)\n");
@@ -86,11 +86,13 @@ static int parse_arg(OPTION *dst, int argc, char **argv)
 
 static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 {
-	int code,n;
+	int code,i,n;
 	int sfd,dfd;
 
 	ARIB_STD_B25 *b25;
 	B_CAS_CARD   *bcas;
+
+	ARIB_STD_B25_PROGRAM_INFO pgrm;
 
 	uint8_t data[8*1024];
 
@@ -184,11 +186,32 @@ static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 	if(dbuf.size > 0){
 		n = _write(dfd, dbuf.data, dbuf.size);
 		if(n != dbuf.size){
-			fprintf(stderr, "error failed on _write(%d)\n", dbuf.size);
+			fprintf(stderr, "error - failed on _write(%d)\n", dbuf.size);
 			goto LAST;
 		}
 	}
 
+	n = b25->get_program_count(b25);
+	if(n < 0){
+		fprintf(stderr, "error - failed on ARIB_STD_B25::get_program_count() : code=%d\n", code);
+		goto LAST;
+	}
+	for(i=0;i<n;i++){
+		code = b25->get_program_info(b25, &pgrm, i);
+		if(code < 0){
+			fprintf(stderr, "error - failed on ARIB_STD_B25::get_program_info(%d) : code=%d\n", i, code);
+			goto LAST;
+		}
+		if(pgrm.ecm_unpurchased_count > 0){
+			fprintf(stderr, "warning - unpurchased ECM is detected\n");
+			fprintf(stderr, "  channel:               %d\n", pgrm.program_number);
+			fprintf(stderr, "  unpurchased ECM count: %d\n", pgrm.ecm_unpurchased_count);
+			fprintf(stderr, "  last ECM error code:   %04x\n", pgrm.last_ecm_error_code);
+			fprintf(stderr, "  undecrypted TS packet: %d\n", pgrm.undecrypted_packet_count);
+			fprintf(stderr, "  total TS packet:       %d\n", pgrm.total_packet_count);
+		}
+	}
+	
 LAST:
 
 	if(sfd >= 0){
