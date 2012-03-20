@@ -1501,9 +1501,12 @@ static int proc_ecm(DECRYPTOR_ELEM *dec, B_CAS_CARD *bcas)
 
 	r = bcas->proc_ecm(bcas, &res, p, length);
 	if(r < 0){
-		dec->m2->clear_scramble_key(dec->m2);
+		if(dec->m2 != NULL){
+			dec->m2->clear_scramble_key(dec->m2);
+		}
 		return ARIB_STD_B25_ERROR_ECM_PROC_FAILURE;
 	}
+	
 	if( (res.return_code != 0x0800) &&
 	    (res.return_code != 0x0400) &&
 	    (res.return_code != 0x0200) ){

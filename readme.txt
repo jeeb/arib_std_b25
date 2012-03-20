@@ -4,7 +4,7 @@
 
 【バージョン】
 
-　0.1.8
+　0.1.9
 
 【作者】
 
@@ -13,11 +13,11 @@
 
 【一次配布元】
 
-　http://www.marumo.ne.jp/db2008_3.htm#24
+　http://www.marumo.ne.jp/db2008_3.htm#31
 
 　あるいは
 
-　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.8.lzh
+　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.9.lzh
 
 【目的】
 
@@ -179,6 +179,16 @@
 　　1 各モジュールが確保したリソースを解放する
 
 【更新履歴】
+
+　・2008, 3/31 - ver. 0.1.9
+
+　　MULTI2 モジュールのインスタンスが未作製の状況で、MULTI2 の
+　　機能を呼び出して例外を発生させることがあったバグを修正
+
+　　# パッチを提供してくれた方に感謝
+
+　　http://www.marumo.ne.jp/db2008_3.htm#31 又は
+　　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.9.lzh
 
 　・2008, 3/24 - ver. 0.1.8
 
