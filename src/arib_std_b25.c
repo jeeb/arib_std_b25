@@ -115,6 +115,7 @@ typedef struct {
 typedef struct {
 
 	int32_t           multi2_round;
+	int32_t           strip;
 	
 	int32_t           unit_size;
 
@@ -325,6 +326,7 @@ enum PID_MAP_TYPE {
  ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
 static void release_arib_std_b25(void *std_b25);
 static int set_multi2_round_arib_std_b25(void *std_b25, int32_t round);
+static int set_strip_arib_std_b25(void *std_b25, int32_t strip);
 static int set_b_cas_card_arib_std_b25(void *std_b25, B_CAS_CARD *bcas);
 static int reset_arib_std_b25(void *std_b25);
 static int flush_arib_std_b25(void *std_b25);
@@ -358,6 +360,7 @@ ARIB_STD_B25 *create_arib_std_b25()
 
 	r->release = release_arib_std_b25;
 	r->set_multi2_round = set_multi2_round_arib_std_b25;
+	r->set_strip = set_strip_arib_std_b25;
 	r->set_b_cas_card = set_b_cas_card_arib_std_b25;
 	r->reset = reset_arib_std_b25;
 	r->flush = flush_arib_std_b25;
@@ -455,6 +458,20 @@ static int set_multi2_round_arib_std_b25(void *std_b25, int32_t round)
 	return 0;
 }
 
+static int set_strip_arib_std_b25(void *std_b25, int32_t strip)
+{
+	ARIB_STD_B25_PRIVATE_DATA *prv;
+
+	prv = private_data(std_b25);
+	if(prv == NULL){
+		return ARIB_STD_B25_ERROR_INVALID_PARAM;
+	}
+
+	prv->strip = strip;
+
+	return 0;
+}
+
 static int set_b_cas_card_arib_std_b25(void *std_b25, B_CAS_CARD *bcas)
 {
 	ARIB_STD_B25_PRIVATE_DATA *prv;
@@ -544,6 +561,10 @@ static int flush_arib_std_b25(void *std_b25)
 		extract_ts_header(&hdr, curr);
 		crypt = hdr.transport_scrambling_control;
 		pid = hdr.pid;
+		
+		if( (pid == 0x1fff) && (prv->strip) ){
+			goto NEXT;
+		}
 		
 		p = curr+4;
 		if(hdr.adaptation_field_control & 0x02){
@@ -1556,6 +1577,11 @@ static int proc_arib_std_b25(ARIB_STD_B25_PRIVATE_DATA *prv)
 		extract_ts_header(&hdr, curr);
 		crypt = hdr.transport_scrambling_control;
 		pid = hdr.pid;
+
+		if( (pid == 0x1fff) && (prv->strip) ){
+			/* strip null(padding) stream */
+			goto NEXT;
+		}
 
 		p = curr+4;
 		if(hdr.adaptation_field_control & 0x02){

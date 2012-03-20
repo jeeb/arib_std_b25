@@ -4,7 +4,7 @@
 
 【バージョン】
 
-　0.1.7
+　0.1.8
 
 【作者】
 
@@ -13,11 +13,11 @@
 
 【一次配布元】
 
-　http://www.marumo.ne.jp/db2008_3.htm#17
+　http://www.marumo.ne.jp/db2008_3.htm#24
 
 　あるいは
 
-　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.7.lzh
+　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.8.lzh
 
 【目的】
 
@@ -179,6 +179,15 @@
 　　1 各モジュールが確保したリソースを解放する
 
 【更新履歴】
+
+　・2008, 3/24 - ver. 0.1.8
+
+　　-s オプション (NULL パケットの削除) を追加
+　　-s 1 で NULL パケットを出力ファイルには保存しなくなる
+　　デフォルトは -s 0 の NULL パケット保持
+
+　　http://www.marumo.ne.jp/db2008_3.htm#24 又は
+　　http://www.marumo.ne.jp/junk/arib_std_b25-0.1.8.lzh
 
 　・2008, 3/17 - ver. 0.1.7
 

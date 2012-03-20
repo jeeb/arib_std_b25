@@ -15,6 +15,7 @@
 
 typedef struct {
 	int32_t round;
+	int32_t strip;
 } OPTION;
 
 static void show_usage();
@@ -49,10 +50,13 @@ int main(int argc, char **argv)
 
 static void show_usage()
 {
-	fprintf(stderr, "b25 - ARIB STD-B25 test program ver. 0.1.7 (2008, 3/17)\n");
+	fprintf(stderr, "b25 - ARIB STD-B25 test program ver. 0.1.8 (2008, 3/24)\n");
 	fprintf(stderr, "usage: b25 [options] src.m2t dst.m2t\n");
 	fprintf(stderr, "options:\n");
 	fprintf(stderr, "  -r round (integer, default=4)\n");
+	fprintf(stderr, "  -s strip\n");
+	fprintf(stderr, "     0: keep null(padding) stream (default)\n");
+	fprintf(stderr, "     1: strip null stream\n");
 	fprintf(stderr, "\n");
 }
 
@@ -61,6 +65,7 @@ static int parse_arg(OPTION *dst, int argc, char **argv)
 	int i;
 	
 	dst->round = 4;
+	dst->strip = 0;
 
 	for(i=1;i<argc;i++){
 		if(argv[i][0] != '-'){
@@ -72,6 +77,14 @@ static int parse_arg(OPTION *dst, int argc, char **argv)
 				dst->round = atoi(argv[i]+2);
 			}else{
 				dst->round = atoi(argv[i+1]);
+				i += 1;
+			}
+			break;
+		case 's':
+			if(argv[i][2]){
+				dst->strip = atoi(argv[i]+2);
+			}else{
+				dst->strip = atoi(argv[i+1]);
 				i += 1;
 			}
 			break;
@@ -119,6 +132,12 @@ static void test_arib_std_b25(const char *src, const char *dst, OPTION *opt)
 	code = b25->set_multi2_round(b25, opt->round);
 	if(code < 0){
 		fprintf(stderr, "error - failed on ARIB_STD_B25::set_multi2_round() : code=%d\n", code);
+		goto LAST;
+	}
+
+	code = b25->set_strip(b25, opt->strip);
+	if(code < 0){
+		fprintf(stderr, "error - failed on ARIB_STD_B25::set_strip() : code=%d\n", code);
 		goto LAST;
 	}
 

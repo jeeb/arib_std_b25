@@ -30,6 +30,8 @@ typedef struct {
 	void (* release)(void *std_b25);
 
 	int (* set_multi2_round)(void *std_b25, int32_t round);
+	int (* set_strip)(void *std_b25, int32_t strip);
+	
 	int (* set_b_cas_card)(void *std_b25, B_CAS_CARD *bcas);
 	
 	int (* reset)(void *std_b25);
